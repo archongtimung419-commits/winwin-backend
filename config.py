@@ -13,7 +13,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent
-DATABASE_PATH = os.getenv("DATABASE_PATH", str(BASE_DIR / "winwin.db")) if os.getenv("RENDER") is None else "/var/data/winwin.db"
+DATA_DIR = "/var/data" if os.path.isdir("/var/data") else str(BASE_DIR)
+DATABASE_PATH = os.getenv("DATABASE_PATH", os.path.join(DATA_DIR, "winwin.db"))
 JWT_SECRET = os.getenv("JWT_SECRET", "dev-only-change-in-production")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_HOURS = 72
