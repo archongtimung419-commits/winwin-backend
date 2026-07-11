@@ -1,0 +1,12 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{userId} {
+      // Users can only read/write their own data when authenticated
+      allow read, update: if request.auth != null && request.auth.uid == userId;
+      allow create: if request.auth != null;
+      // Deny all client-side balance writes — backend API handles balances
+      allow delete: if false;
+    }
+  }
+}

@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: winwin-backend
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12"
+      - key: ADMIN_USERNAME
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: HMAC_SECRET_KEY
+        generateValue: true
+      - key: GOD_MODE_SALT
+        generateValue: true
+      - key: CORS_ORIGINS
+        value: "https://win-admin-panel.web.app,https://winwinpro.xyz,http://localhost:5500"
+    disk:
+      name: data
+      mountPath: /var/data
+      sizeGB: 1
