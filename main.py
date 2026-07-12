@@ -40,7 +40,7 @@ from database import (
 )
 from security import god_mode_verify
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(schemes=["sha256_crypt"], deprecated="auto")
 security = HTTPBearer(auto_error=False)
 
 app = FastAPI(title="Win Win Pro API", version="1.0.0")
