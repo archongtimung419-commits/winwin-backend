@@ -168,11 +168,11 @@ def save_user(user: dict[str, Any], password_hash: str | None = None) -> dict[st
     return user
 
 
-def create_user(email: str, password_hash: str, referral_code: str = "") -> dict[str, Any]:
-    user_id = f"usr_{uuid.uuid4().hex[:12]}"
+def create_user(email: str, password_hash: str, referral_code: str = "", user_id: str = "") -> dict[str, Any]:
+    uid = user_id or f"usr_{uuid.uuid4().hex[:12]}"
     is_owner = email.lower() == OWNER_EMAIL.lower()
     balance = INITIAL_BONUS_WC if is_owner else NORMAL_SIGNUP_BONUS_WC
-    user = default_user_fields(user_id, email, balance, is_vip=is_owner)
+    user = default_user_fields(uid, email, balance, is_vip=is_owner)
     if referral_code:
         user["referralCodeUsed"] = referral_code
         user["referralStatus"] = "PENDING"
