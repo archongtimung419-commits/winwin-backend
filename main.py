@@ -106,6 +106,11 @@ class UserSyncRequest(BaseModel):
     email: str
     username: str = ""
 
+class UpdateProfileRequest(BaseModel):
+    uid: str
+    new_username: str
+
+
 
 # ── Auth helpers ─────────────────────────────────────────────────────────────
 
@@ -266,6 +271,15 @@ def sync_user(body: UserSyncRequest) -> dict[str, Any]:
     user = create_user(body.email.lower(), placeholder_hash, user_id=body.uid)
     user["username"] = body.username or body.email.split("@")[0]
     return save_user(user, placeholder_hash)
+
+@app.post("/api/update-profile")
+def update_profile(body: UpdateProfileRequest) -> dict[str, Any]:
+    from database import update_user_display_name
+    success = update_user_display_name(body.uid, body.new_username)
+    if not success:
+        raise HTTPException(status_code=500, detail="Profile update failed")
+    return {"status": "success"}
+
 
 
 @app.post("/api/tasks/complete")

@@ -171,6 +171,17 @@ def save_user(user: dict[str, Any], password_hash: str | None = None) -> dict[st
     user["email"] = email
     return user
 
+def update_user_display_name(uid: str, new_username: str) -> bool:
+    with get_conn() as conn:
+        row = conn.execute("SELECT data_json FROM users WHERE user_id = ?", (uid,)).fetchone()
+        if not row:
+            return False
+        data = json.loads(row["data_json"])
+        data["username"] = new_username
+        conn.execute("UPDATE users SET data_json = ? WHERE user_id = ?", (json.dumps(data), uid))
+        return True
+
+
 
 def create_user(email: str, password_hash: str, referral_code: str = "", user_id: str = "") -> dict[str, Any]:
     uid = user_id or f"usr_{uuid.uuid4().hex[:12]}"
