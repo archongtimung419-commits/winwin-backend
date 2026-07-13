@@ -129,12 +129,16 @@ def get_user_by_email(email: str) -> tuple[dict[str, Any], str] | None:
 
 
 def save_user(user: dict[str, Any], password_hash: str | None = None) -> dict[str, Any]:
+    # Preserve the caller's explicit accountStatus (e.g. admin PATCH sets ACTIVE/BANNED).
+    # Only auto-TAMPER if no explicit status was set AND signatures are stale.
+    explicit_status = user.get("accountStatus")
     valid, layer = god_mode_verify(user, GOD_MODE_SALT, HMAC_SECRET_KEY)
-    if not valid:
+    if not valid and not explicit_status:
         user["accountStatus"] = "TAMPERED"
-    else:
-        user["accountStatus"] = user.get("accountStatus", "ACTIVE")
+    elif not explicit_status:
+        user["accountStatus"] = "ACTIVE"
 
+    # Always re-sign with the current accountStatus so signatures stay valid.
     user.update(
         god_mode_sign(
             user["userId"], user["balance"], user.get("isVip", False),
