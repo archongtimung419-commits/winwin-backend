@@ -105,6 +105,8 @@ class UserSyncRequest(BaseModel):
     uid: str
     email: str
     username: str = ""
+    balance: float = 0.0
+    total_earnings: float = 0.0
 
 class UpdateProfileRequest(BaseModel):
     uid: str
@@ -253,23 +255,41 @@ def sync_user(body: UserSyncRequest) -> dict[str, Any]:
     Called by the frontend after Google/Phone sign-up so the admin panel sees them."""
     existing = get_user_by_id(body.uid)
     if existing:
-        # User already exists — update email/username if changed
+        # User already exists — update email/username and balance if changed
         if body.email and existing.get("email", "").lower() != body.email.lower():
             existing["email"] = body.email
         if body.username:
             existing["username"] = body.username
+
+        # Two-way balance sync: accept frontend's balance if it is greater
+        if body.balance > existing.get("balance", 0):
+            existing["balance"] = body.balance
+
+        # Optional: Sync total earnings if provided and greater
+        if body.total_earnings > existing.get("total_earnings", 0):
+            existing["total_earnings"] = body.total_earnings
+
         return save_user(existing)
 
     # Check by email to avoid duplicates
     by_email = get_user_by_email(body.email.lower())
     if by_email:
         user, _ = by_email
+        if body.balance > user.get("balance", 0):
+            user["balance"] = body.balance
+            save_user(user)
         return user
 
     # Create new user in backend with a placeholder password hash (OAuth user — no local password)
     placeholder_hash = pwd_context.hash("__oauth_no_password__")
     user = create_user(body.email.lower(), placeholder_hash, user_id=body.uid)
     user["username"] = body.username or body.email.split("@")[0]
+    
+    if body.balance > user.get("balance", 0):
+        user["balance"] = body.balance
+    if body.total_earnings > user.get("total_earnings", 0):
+        user["total_earnings"] = body.total_earnings
+
     return save_user(user, placeholder_hash)
 
 @app.post("/api/update-profile")
