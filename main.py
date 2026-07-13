@@ -275,9 +275,7 @@ def sync_user(body: UserSyncRequest) -> dict[str, Any]:
 @app.post("/api/update-profile")
 def update_profile(body: UpdateProfileRequest) -> dict[str, Any]:
     from database import update_user_display_name
-    success = update_user_display_name(body.uid, body.new_username)
-    if not success:
-        raise HTTPException(status_code=500, detail="Profile update failed")
+    update_user_display_name(body.uid, body.new_username)
     return {"status": "success"}
 
 
