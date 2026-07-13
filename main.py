@@ -38,7 +38,6 @@ from database import (
     set_system_setting,
     update_withdrawal_status,
 )
-from security import god_mode_verify
 
 pwd_context = CryptContext(schemes=["sha256_crypt"], deprecated="auto")
 security = HTTPBearer(auto_error=False)
@@ -86,7 +85,6 @@ class WithdrawalRequest(BaseModel):
 
 class OtpRequest(BaseModel):
     phone: str
-    otp: str
 
 
 class AdminLoginRequest(BaseModel):
@@ -105,12 +103,12 @@ class UserSyncRequest(BaseModel):
     uid: str
     email: str
     username: str = ""
-    balance: float = 0.0
-    total_earnings: float = 0.0
+
 
 class UpdateProfileRequest(BaseModel):
     uid: str
     new_username: str
+
 
 class OnboardingRequest(BaseModel):
     uid: str
@@ -119,6 +117,9 @@ class OnboardingRequest(BaseModel):
     gender: str | None = None
     state: str | None = None
 
+
+class UserMeUpdateRequest(BaseModel):
+    username: str | None = None
 
 
 # ── Auth helpers ─────────────────────────────────────────────────────────────
@@ -144,19 +145,16 @@ def get_current_user(creds: HTTPAuthorizationCredentials | None = Depends(securi
     user = get_user_by_id(payload["sub"])
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    valid, layer = god_mode_verify(user, __import__("config").GOD_MODE_SALT, __import__("config").HMAC_SECRET_KEY)
-    if not valid:
-        # Auto-repair: re-sign with correct backend keys and restore ACTIVE status.
-        # This handles cases where client-side mutations (e.g. profile edits)
-        # stale the signatures but the JWT identity is still valid.
-        from config import GOD_MODE_SALT as _SALT, HMAC_SECRET_KEY as _HMAC
-        user["accountStatus"] = "ACTIVE"
-        user.update(god_mode_sign(
-            user["userId"], user["balance"], user.get("isVip", False),
-            "ACTIVE", user.get("dailyStreak", 1), _SALT, _HMAC
-        ))
-        save_user(user)
+    if user.get("accountStatus") == "BANNED":
+        raise HTTPException(status_code=403, detail="Account is banned.")
+    if user.get("accountStatus") == "TAMPERED":
+        raise HTTPException(status_code=403, detail="Account locked due to tampering.")
     return user
+
+
+def verify_user_active(user: dict[str, Any]) -> None:
+    if user.get("accountStatus") != "ACTIVE":
+        raise HTTPException(status_code=403, detail="Account is not active.")
 
 
 def get_admin(creds: HTTPAuthorizationCredentials | None = Depends(security)) -> dict[str, Any]:
@@ -166,19 +164,6 @@ def get_admin(creds: HTTPAuthorizationCredentials | None = Depends(security)) ->
     if payload.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin access only")
     return payload
-
-
-def verify_user_integrity(user: dict[str, Any]) -> None:
-    valid, layer = god_mode_verify(user, __import__("config").GOD_MODE_SALT, __import__("config").HMAC_SECRET_KEY)
-    if not valid:
-        # Auto-repair: re-sign with correct backend keys and restore ACTIVE status.
-        from config import GOD_MODE_SALT as _SALT, HMAC_SECRET_KEY as _HMAC
-        user["accountStatus"] = "ACTIVE"
-        user.update(god_mode_sign(
-            user["userId"], user["balance"], user.get("isVip", False),
-            "ACTIVE", user.get("dailyStreak", 1), _SALT, _HMAC
-        ))
-        save_user(user)
 
 
 # ── Startup ──────────────────────────────────────────────────────────────────
@@ -195,7 +180,7 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-# ── System status (public — no auth required) ────────────────────────────────
+# ── System status ────────────────────────────────────────────────────────────
 
 @app.get("/api/system/status")
 def get_system_status() -> dict[str, str]:
@@ -236,6 +221,8 @@ def login(body: LoginRequest) -> dict[str, Any]:
         raise HTTPException(status_code=401, detail="Invalid credentials.")
     if user.get("accountStatus") == "TAMPERED":
         raise HTTPException(status_code=403, detail="Account locked due to tampering.")
+    if user.get("accountStatus") == "BANNED":
+        raise HTTPException(status_code=403, detail="Account is banned.")
     token = create_token(user["userId"], "user")
     return {"token": token, "user": user}
 
@@ -244,32 +231,47 @@ def login(body: LoginRequest) -> dict[str, Any]:
 
 @app.get("/api/users/me")
 def get_me(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+    now = datetime.now(timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    thirty_days_ago = now - timedelta(days=30)
+    history = user.get("earningHistory") or []
+    def _ts(e):
+        t = e.get("timestamp") or e.get("date")
+        if t is None:
+            return None
+        if isinstance(t, (int, float)):
+            return datetime.fromtimestamp(t / 1000 if t > 1e12 else t, tz=timezone.utc)
+        return datetime.fromisoformat(t.replace("Z", "+00:00")).replace(tzinfo=timezone.utc)
+    user["todays_earnings"] = sum(e.get("amount", 0) for e in history if _ts(e) and _ts(e) >= today_start)
+    user["last_30_days"] = sum(e.get("amount", 0) for e in history if _ts(e) and _ts(e) >= thirty_days_ago)
+    user["earnings"] = user.get("balance", 0)
+    user["offers_completed"] = (
+        user.get("videoAdsCompleted", 0) + user.get("completed_articles_count", 0)
+        + user.get("directLinksCompleted", 0) + user.get("socialTasksCompleted", 0)
+        + user.get("completed_app_installs", 0)
+    )
     return user
 
 
 @app.put("/api/users/me")
-def update_me(updates: dict[str, Any], user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
-    protected = {"userId", "email", "dataSignature", "hmacSignature", "freezeGuard", "balance"}
-    for key, value in updates.items():
-        if key not in protected:
-            user[key] = value
+def update_me(body: UserMeUpdateRequest, user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+    verify_user_active(user)
+    if body.username is not None:
+        user["username"] = body.username
     return save_user(user)
 
 
 import uuid
 
 @app.post("/api/users/onboarding")
-def complete_onboarding(body: OnboardingRequest):
-    user = get_user_by_id(body.uid)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
+def complete_onboarding(body: OnboardingRequest, user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+    verify_user_active(user)
     if user.get("onboardingCompleted"):
         return {"message": "Already onboarded", "user": user}
 
     reward = 0
     if body.name:
-        user["username"] = body.name # save to username as well
+        user["username"] = body.name
         user["name"] = body.name
         reward += 25
     if body.age:
@@ -285,7 +287,7 @@ def complete_onboarding(body: OnboardingRequest):
     if reward > 0:
         user["balance"] = user.get("balance", 0) + reward
         user["total_earnings"] = user.get("total_earnings", 0) + reward
-        
+
         eh = user.get("earningHistory", {})
         tx_id = f"tx_{uuid.uuid4().hex[:8]}"
         eh[tx_id] = {
@@ -300,77 +302,79 @@ def complete_onboarding(body: OnboardingRequest):
     save_user(user)
     return {"message": "Onboarding processed", "reward": reward, "user": user}
 
+
 @app.post("/api/users/sync")
 def sync_user(body: UserSyncRequest) -> dict[str, Any]:
-    """Sync a frontend-authenticated user into the backend SQLite database.
-    Called by the frontend after Google/Phone sign-up so the admin panel sees them."""
     existing = get_user_by_id(body.uid)
     if existing:
-        # User already exists — update email/username and balance if changed
         if body.email and existing.get("email", "").lower() != body.email.lower():
             existing["email"] = body.email
         if body.username:
             existing["username"] = body.username
-
-        # Two-way balance sync: accept frontend's balance if it is greater
-        if body.balance > existing.get("balance", 0):
-            existing["balance"] = body.balance
-
-        # Optional: Sync total earnings if provided and greater
-        if body.total_earnings > existing.get("total_earnings", 0):
-            existing["total_earnings"] = body.total_earnings
-
         return save_user(existing)
 
-    # Check by email to avoid duplicates
     by_email = get_user_by_email(body.email.lower())
     if by_email:
         user, _ = by_email
-        if body.balance > user.get("balance", 0):
-            user["balance"] = body.balance
-            save_user(user)
         return user
 
-    # Create new user in backend with a placeholder password hash (OAuth user — no local password)
     placeholder_hash = pwd_context.hash("__oauth_no_password__")
     user = create_user(body.email.lower(), placeholder_hash, user_id=body.uid)
     user["username"] = body.username or body.email.split("@")[0]
-    
-    if body.balance > user.get("balance", 0):
-        user["balance"] = body.balance
-    if body.total_earnings > user.get("total_earnings", 0):
-        user["total_earnings"] = body.total_earnings
 
     return save_user(user, placeholder_hash)
 
-@app.post("/api/update-profile")
-def update_profile(body: UpdateProfileRequest) -> dict[str, Any]:
-    from database import update_user_display_name
-    update_user_display_name(body.uid, body.new_username)
-    return {"status": "success"}
 
+@app.post("/api/update-profile")
+def update_profile(body: UpdateProfileRequest, user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+    verify_user_active(user)
+    user["username"] = body.new_username
+    return save_user(user)
+
+
+# ── Task reward config ───────────────────────────────────────────────────────
+
+TASK_REWARDS = {
+    "videoAd": 3,
+    "articleRead": 3,
+    "directLink": 3,
+    "socialFollow": 28,
+    "googleGig": 200,
+    "webMicroGig": 200,
+    "casualGame": 5,
+    "socialMicro": 15,
+    "customTask": 300,
+    "cpaCPL": 500,
+}
 
 
 @app.post("/api/tasks/complete")
 def complete_task(body: TaskCompleteRequest, user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
-    if user.get("accountStatus") == "TAMPERED":
-        raise HTTPException(status_code=403, detail="Account locked.")
-    if body.amount <= 0 or body.amount > 5000:
+    verify_user_active(user)
+
+    reward = TASK_REWARDS.get(body.task_type)
+    if reward is None:
+        raise HTTPException(status_code=400, detail=f"Unknown task type: {body.task_type}")
+    if reward <= 0:
         raise HTTPException(status_code=400, detail="Invalid reward amount.")
 
-    user["balance"] = float(user.get("balance", 0)) + body.amount
+    user["balance"] = float(user.get("balance", 0)) + reward
     ledger = user.setdefault("ledger", {"grossWc": 0, "userWc": 0, "refWc": 0, "serverWc": 0, "profitWc": 0})
-    ledger["grossWc"] = ledger.get("grossWc", 0) + body.amount
-    ledger["userWc"] = ledger.get("userWc", 0) + body.amount
+    ledger["grossWc"] = ledger.get("grossWc", 0) + reward
+    ledger["userWc"] = ledger.get("userWc", 0) + reward
 
     history = user.setdefault("earningHistory", [])
-    history.append({"task": body.task_type, "amount": body.amount, "at": datetime.now(timezone.utc).isoformat()})
+    if isinstance(history, dict):
+        history = []
+        user["earningHistory"] = history
+    history.append({"task": body.task_type, "amount": reward, "at": datetime.now(timezone.utc).isoformat()})
 
     return save_user(user)
 
 
 @app.post("/api/referrals/credit")
 def credit_referral(body: ReferralCreditRequest, user: dict[str, Any] = Depends(get_current_user)) -> dict[str, str]:
+    verify_user_active(user)
     all_users = list_all_users()
     referrer = next(
         (u for u in all_users if u["userId"].endswith(body.referral_code) or u["userId"] == body.referral_code),
@@ -398,6 +402,7 @@ def credit_referral(body: ReferralCreditRequest, user: dict[str, Any] = Depends(
 
 @app.post("/api/withdrawals")
 def submit_withdrawal(body: WithdrawalRequest, user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+    verify_user_active(user)
     if body.amount < MIN_REDEEM_WC:
         raise HTTPException(status_code=400, detail=f"Minimum redemption is {MIN_REDEEM_WC} WinCash.")
     if float(user.get("balance", 0)) < body.amount:
@@ -415,7 +420,10 @@ def submit_withdrawal(body: WithdrawalRequest, user: dict[str, Any] = Depends(ge
 @app.post("/api/otp/send")
 async def send_otp(body: OtpRequest) -> dict[str, Any]:
     if not FAST2SMS_API_KEY:
-        return {"success": True, "message": "Mock OTP mode — use 123456 in dev"}
+        otp = str(100000 + int.from_bytes(__import__("os").urandom(3), "big") % 900000)
+        return {"success": True, "message": "Mock OTP mode", "otp": otp}
+
+    otp = str(100000 + int.from_bytes(__import__("os").urandom(3), "big") % 900000)
 
     async with httpx.AsyncClient() as client:
         response = await client.post(
@@ -423,7 +431,7 @@ async def send_otp(body: OtpRequest) -> dict[str, Any]:
             headers={"authorization": FAST2SMS_API_KEY, "Content-Type": "application/json"},
             json={
                 "route": "q",
-                "message": f"Your WinWin Pro verification OTP is: {body.otp}. Do not share this with anyone.",
+                "message": f"Your WinWin Pro verification OTP is: {otp}. Do not share this with anyone.",
                 "language": "english",
                 "flash": 0,
                 "numbers": body.phone,
@@ -440,7 +448,6 @@ async def send_otp(body: OtpRequest) -> dict[str, Any]:
 
 @app.post("/api/admin/login")
 def admin_login(body: AdminLoginRequest) -> dict[str, str]:
-    # Constant-time comparison to prevent timing attacks
     username_ok = _hmac.compare_digest(body.username, ADMIN_USERNAME)
     password_ok = _hmac.compare_digest(body.password, ADMIN_PASSWORD)
     if not (username_ok and password_ok):
@@ -450,7 +457,6 @@ def admin_login(body: AdminLoginRequest) -> dict[str, str]:
 
 @app.post("/api/admin/verify")
 def verify_admin_access(body: AdminLoginRequest) -> dict[str, str]:
-    """Server-side admin password verification — called by admin frontend."""
     if not body.password:
         raise HTTPException(status_code=400, detail="Missing credentials.")
 

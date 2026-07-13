@@ -59,6 +59,9 @@ def get_conn():
     try:
         yield conn
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -99,7 +102,6 @@ def init_db() -> None:
             )
             """
         )
-        # Seed default maintenance mode if not present
         existing = conn.execute("SELECT 1 FROM system_settings WHERE key = 'platform_mode'").fetchone()
         if not existing:
             conn.execute(
@@ -129,16 +131,6 @@ def get_user_by_email(email: str) -> tuple[dict[str, Any], str] | None:
 
 
 def save_user(user: dict[str, Any], password_hash: str | None = None) -> dict[str, Any]:
-    # Preserve the caller's explicit accountStatus (e.g. admin PATCH sets ACTIVE/BANNED).
-    # Only auto-TAMPER if no explicit status was set AND signatures are stale.
-    explicit_status = user.get("accountStatus")
-    valid, layer = god_mode_verify(user, GOD_MODE_SALT, HMAC_SECRET_KEY)
-    if not valid and not explicit_status:
-        user["accountStatus"] = "TAMPERED"
-    elif not explicit_status:
-        user["accountStatus"] = "ACTIVE"
-
-    # Always re-sign with the current accountStatus so signatures stay valid.
     user.update(
         god_mode_sign(
             user["userId"], user["balance"], user.get("isVip", False),
@@ -171,20 +163,12 @@ def save_user(user: dict[str, Any], password_hash: str | None = None) -> dict[st
     user["email"] = email
     return user
 
-def update_user_display_name(uid: str, new_username: str) -> bool:
-    with get_conn() as conn:
-        row = conn.execute("SELECT data_json FROM users WHERE user_id = ?", (uid,)).fetchone()
-        if not row:
-            return False
-        data = json.loads(row["data_json"])
-        data["username"] = new_username
-        conn.execute("UPDATE users SET data_json = ? WHERE user_id = ?", (json.dumps(data), uid))
-        return True
-
-
 
 def create_user(email: str, password_hash: str, referral_code: str = "", user_id: str = "") -> dict[str, Any]:
-    uid = user_id or f"usr_{uuid.uuid4().hex[:12]}"
+    if user_id and get_user_by_id(user_id):
+        uid = f"usr_{uuid.uuid4().hex[:12]}"
+    else:
+        uid = user_id or f"usr_{uuid.uuid4().hex[:12]}"
     is_owner = email.lower() == OWNER_EMAIL.lower()
     balance = INITIAL_BONUS_WC if is_owner else NORMAL_SIGNUP_BONUS_WC
     user = default_user_fields(uid, email, balance, is_vip=is_owner)
@@ -278,7 +262,7 @@ def update_withdrawal_status(wid: str, new_status: str) -> dict[str, Any] | None
         }
 
 
-# ── Content Config (stored in system_settings as JSON) ────────────────────────
+# ── Content Config ───────────────────────────────────────────────────────────
 
 def get_content_config() -> dict[str, Any] | None:
     raw = get_system_setting("content_config")
