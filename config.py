@@ -31,7 +31,7 @@ CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:5
 
 WINCASH_PER_RUPEE = 100
 INITIAL_BONUS_WC = 5000
-NORMAL_SIGNUP_BONUS_WC = 100
+NORMAL_SIGNUP_BONUS_WC = 0
 REFERRAL_CAP_WC = 10000
 MIN_REDEEM_WC = 1000
 OWNER_EMAIL = os.getenv("OWNER_EMAIL", "arsong@modreator.com")

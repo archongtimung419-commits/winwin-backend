@@ -112,6 +112,13 @@ class UpdateProfileRequest(BaseModel):
     uid: str
     new_username: str
 
+class OnboardingRequest(BaseModel):
+    uid: str
+    name: str | None = None
+    age: str | None = None
+    gender: str | None = None
+    state: str | None = None
+
 
 
 # ── Auth helpers ─────────────────────────────────────────────────────────────
@@ -248,6 +255,50 @@ def update_me(updates: dict[str, Any], user: dict[str, Any] = Depends(get_curren
             user[key] = value
     return save_user(user)
 
+
+import uuid
+
+@app.post("/api/users/onboarding")
+def complete_onboarding(body: OnboardingRequest):
+    user = get_user_by_id(body.uid)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user.get("onboardingCompleted"):
+        return {"message": "Already onboarded", "user": user}
+
+    reward = 0
+    if body.name:
+        user["username"] = body.name # save to username as well
+        user["name"] = body.name
+        reward += 25
+    if body.age:
+        user["age"] = body.age
+        reward += 25
+    if body.gender:
+        user["gender"] = body.gender
+        reward += 25
+    if body.state:
+        user["state"] = body.state
+        reward += 25
+
+    if reward > 0:
+        user["balance"] = user.get("balance", 0) + reward
+        user["total_earnings"] = user.get("total_earnings", 0) + reward
+        
+        eh = user.get("earningHistory", {})
+        tx_id = f"tx_{uuid.uuid4().hex[:8]}"
+        eh[tx_id] = {
+            "type": "ONBOARDING",
+            "amount": reward,
+            "desc": "Profile Setup Reward",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        user["earningHistory"] = eh
+
+    user["onboardingCompleted"] = True
+    save_user(user)
+    return {"message": "Onboarding processed", "reward": reward, "user": user}
 
 @app.post("/api/users/sync")
 def sync_user(body: UserSyncRequest) -> dict[str, Any]:
