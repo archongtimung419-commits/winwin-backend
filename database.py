@@ -1,3 +1,4 @@
+import os
 import json
 import sqlite3
 import uuid
@@ -8,6 +9,51 @@ from typing import Any
 from config import DATABASE_PATH, GOD_MODE_SALT, HMAC_SECRET_KEY, INITIAL_BONUS_WC, NORMAL_SIGNUP_BONUS_WC, OWNER_EMAIL
 from security import god_mode_sign, god_mode_verify
 
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+IS_POSTGRES = DATABASE_URL.startswith("postgres")
+
+if IS_POSTGRES:
+    import psycopg2
+    import psycopg2.extras
+
+class DBConnectionWrapper:
+    def __init__(self):
+        self.is_pg = IS_POSTGRES
+        if self.is_pg:
+            self.conn = psycopg2.connect(DATABASE_URL)
+        else:
+            self.conn = sqlite3.connect(DATABASE_PATH)
+            self.conn.row_factory = sqlite3.Row
+
+    def execute(self, query, params=()):
+        if self.is_pg:
+            cur = self.conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            query = query.replace("?", "%s")
+            cur.execute(query, params)
+            return cur
+        else:
+            return self.conn.execute(query, params)
+
+    def commit(self):
+        self.conn.commit()
+
+    def rollback(self):
+        self.conn.rollback()
+
+    def close(self):
+        self.conn.close()
+
+@contextmanager
+def get_conn():
+    conn = DBConnectionWrapper()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
