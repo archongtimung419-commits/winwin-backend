@@ -592,3 +592,36 @@ def admin_get_content_config(_: dict[str, Any] = Depends(get_admin)) -> dict[str
 def admin_put_content_config(body: dict[str, Any], _: dict[str, Any] = Depends(get_admin)) -> dict[str, Any]:
     set_content_config(body)
     return {"status": "ok"}
+
+
+# ── Offerwall Postbacks ───────────────────────────────────────────────────────
+
+@app.get("/api/timewall-postback")
+def timewall_postback(userId: str, reward: float, txId: str) -> dict[str, Any]:
+    user = get_user_by_id(userId)
+    if not user:
+        raise HTTPException(status_code=400, detail="User not found")
+        
+    history = user.get("earningsHistory") or user.get("earningHistory") or []
+    if any(h.get("id") == txId for h in history):
+        return {"status": "ok", "message": "Already credited"}
+
+    user["balance"] = float(user.get("balance", 0)) + reward
+    user["earnings"] = float(user.get("earnings", 0)) + reward
+    
+    history.append({
+        "id": txId,
+        "type": "timewall_offer",
+        "name": "TimeWall Offer",
+        "amount": reward,
+        "date": datetime.now(timezone.utc).isoformat(),
+        "status": "Paid"
+    })
+    user["earningsHistory"] = history
+    
+    ledger = user.setdefault("ledger", {"grossWc": 0, "userWc": 0, "refWc": 0, "serverWc": 0, "profitWc": 0})
+    ledger["grossWc"] = ledger.get("grossWc", 0) + reward
+    ledger["userWc"] = ledger.get("userWc", 0) + reward
+    
+    save_user(user)
+    return {"status": "ok", "credited": reward}
