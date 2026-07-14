@@ -304,20 +304,7 @@ def complete_onboarding(body: OnboardingRequest, user: dict[str, Any] = Depends(
         user["onboardingCompleted"] = True
         if not user.get("ob_m1_done"):
             user["ob_m1_done"] = True
-            user["balance"] = float(user.get("balance", 0)) + 100
-            user["earnings"] = float(user.get("earnings", 0)) + 100
             user["onboarding_stage"] = user.get("onboarding_stage", 0) + 1
-            history = user.get("earningsHistory", [])
-            tx_id = f"TX_OBM1_{int(datetime.now(timezone.utc).timestamp())}_{uuid.uuid4().hex[:4]}"
-            history.append({
-                "id": tx_id,
-                "type": "onboarding_milestone_1",
-                "name": "Welcome Bonus: Profile Completion",
-                "amount": 100,
-                "date": datetime.now(timezone.utc).isoformat(),
-                "status": "Paid"
-            })
-            user["earningsHistory"] = history
         
     return save_user(user)
 
