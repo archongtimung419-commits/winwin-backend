@@ -612,11 +612,11 @@ def timewall_postback(
     expected_hash = hashlib.sha256(concat_str.encode('utf-8')).hexdigest()
     
     if hash and hash != expected_hash:
-        raise HTTPException(status_code=400, detail="Invalid hash")
+        return {"status": "ok", "message": "Ignored: Invalid hash"}
 
     user = get_user_by_id(userID)
     if not user:
-        raise HTTPException(status_code=400, detail="User not found")
+        return {"status": "ok", "message": "Ignored: User not found"}
         
     history = user.get("earningsHistory") or user.get("earningHistory") or []
     ledger = user.setdefault("ledger", {"grossWc": 0, "userWc": 0, "refWc": 0, "serverWc": 0, "profitWc": 0})
