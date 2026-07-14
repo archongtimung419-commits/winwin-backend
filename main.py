@@ -116,6 +116,7 @@ class OnboardingRequest(BaseModel):
     age: str | None = None
     gender: str | None = None
     state: str | None = None
+    isFinalStep: bool = False
 
 
 class UserMeUpdateRequest(BaseModel):
@@ -270,38 +271,39 @@ def complete_onboarding(body: OnboardingRequest, user: dict[str, Any] = Depends(
         return {"message": "Already onboarded", "user": user}
 
     reward = 0
-    if body.name:
+    if body.name and not user.get("name"):
         user["username"] = body.name
         user["name"] = body.name
         reward += 25
-    if body.age:
+    if body.age and not user.get("age"):
         user["age"] = body.age
         reward += 25
-    if body.gender:
+    if body.gender and not user.get("gender"):
         user["gender"] = body.gender
         reward += 25
-    if body.state:
+    if body.state and not user.get("state"):
         user["state"] = body.state
         reward += 25
 
     if reward > 0:
-        user["balance"] = user.get("balance", 0) + reward
-        user["total_earnings"] = user.get("total_earnings", 0) + reward
+        user["balance"] = user.get("balance", 0.0) + float(reward)
+        user["earnings"] = user.get("earnings", 0.0) + float(reward)
+        history = user.get("earningsHistory", [])
+        tx_id = f"TX_ONBOARD_{int(datetime.now(timezone.utc).timestamp())}_{random.randint(1000,9999)}"
+        history.append({
+            "id": tx_id,
+            "type": "onboarding_reward",
+            "name": "Profile Completion",
+            "amount": reward,
+            "date": datetime.now(timezone.utc).isoformat(),
+            "status": "Paid"
+        })
+        user["earningsHistory"] = history
 
-        history = user.setdefault("earningHistory", [])
-        if isinstance(history, list):
-            history.append({
-                "id": f"tx_{uuid.uuid4().hex[:8]}",
-                "type": "ONBOARDING",
-                "amount": reward,
-                "desc": "Profile Setup Reward",
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            })
-            user["earningHistory"] = history
-
-    user["onboardingCompleted"] = True
-    save_user(user)
-    return {"message": "Onboarding processed", "reward": reward, "user": user}
+    if body.isFinalStep:
+        user["onboardingCompleted"] = True
+        
+    return save_user(user)
 
 
 @app.post("/api/users/sync")
