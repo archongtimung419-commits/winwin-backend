@@ -598,9 +598,81 @@ def admin_put_content_config(body: dict[str, Any], _: dict[str, Any] = Depends(g
 
 import hashlib
 
-from fastapi import Request
-
 @app.get("/api/timewall-postback")
 def timewall_postback(request: Request) -> dict[str, Any]:
-    # TEMPORARY BYPASS MODE - All security and DB validation disabled for TimeWall configuration saving
-    return {"status": "ok", "message": "success"}
+    params = request.query_params
+    userID = params.get("userID") or params.get("userId") or ""
+    transactionID = params.get("transactionID") or params.get("transactionId") or ""
+    revenue = params.get("revenue", "0")
+    currencyAmount = float(params.get("currencyAmount") or params.get("reward") or 0.0)
+    hash_val = params.get("hash") or params.get("signature") or ""
+    type_val = params.get("type", "credit")
+
+    secret_key = "b6d96ae844a97a6ab08dcd152dedd2ad"
+    concat_str = f"{userID}{revenue}{secret_key}"
+    expected_hash = hashlib.sha256(concat_str.encode('utf-8')).hexdigest()
+    
+    if hash_val and hash_val != expected_hash:
+        return {"status": "ok", "message": "Ignored: Invalid hash"}
+
+
+    user = get_user_by_id(userID)
+    if not user:
+        return {"status": "ok", "message": "Ignored: User not found"}
+        
+    history = user.get("earningsHistory") or user.get("earningHistory") or []
+    ledger = user.setdefault("ledger", {"grossWc": 0, "userWc": 0, "refWc": 0, "serverWc": 0, "profitWc": 0})
+    
+    if type == "credit":
+        if any(h.get("id") == transactionID for h in history):
+            return {"status": "ok", "message": "Already credited"}
+
+        user["balance"] = float(user.get("balance", 0)) + currencyAmount
+        user["earnings"] = float(user.get("earnings", 0)) + currencyAmount
+        
+        history.append({
+            "id": transactionID,
+            "type": "timewall_offer",
+            "name": "TimeWall Offer",
+            "amount": currencyAmount,
+            "date": datetime.now(timezone.utc).isoformat(),
+            "status": "Paid"
+        })
+        ledger["grossWc"] = ledger.get("grossWc", 0) + currencyAmount
+        ledger["userWc"] = ledger.get("userWc", 0) + currencyAmount
+
+    elif type_val == "chargeback":
+        if any(h.get("id") == f"CB_{transactionID}" for h in history):
+            return {"status": "ok", "message": "Already chargebacked"}
+            
+        user["balance"] = float(user.get("balance", 0)) + currencyAmount
+        
+        history.append({
+            "id": f"CB_{transactionID}",
+            "type": "timewall_chargeback",
+            "name": "TimeWall Chargeback",
+            "amount": currencyAmount,
+            "date": datetime.now(timezone.utc).isoformat(),
+            "status": "Chargeback"
+        })
+        ledger["userWc"] = ledger.get("userWc", 0) + currencyAmount
+
+    elif type_val == "hold":
+        if any(h.get("id") == f"HOLD_{transactionID}" for h in history):
+            return {"status": "ok", "message": "Already on hold"}
+        history.append({
+            "id": f"HOLD_{transactionID}",
+            "type": "timewall_hold",
+            "name": "TimeWall Offer (Pending)",
+            "amount": currencyAmount,
+            "date": datetime.now(timezone.utc).isoformat(),
+            "status": "Pending"
+        })
+
+    elif type_val == "hold_cancelled":
+        history = [h for h in history if h.get("id") != f"HOLD_{transactionID}"]
+
+    user["earningsHistory"] = history
+    save_user(user)
+    return {"status": "ok"}
+
