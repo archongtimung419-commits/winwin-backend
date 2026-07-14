@@ -289,7 +289,7 @@ def complete_onboarding(body: OnboardingRequest, user: dict[str, Any] = Depends(
         user["balance"] = user.get("balance", 0.0) + float(reward)
         user["earnings"] = user.get("earnings", 0.0) + float(reward)
         history = user.get("earningsHistory", [])
-        tx_id = f"TX_ONBOARD_{int(datetime.now(timezone.utc).timestamp())}_{random.randint(1000,9999)}"
+        tx_id = f"TX_ONBOARD_{int(datetime.now(timezone.utc).timestamp())}_{uuid.uuid4().hex[:4]}"
         history.append({
             "id": tx_id,
             "type": "onboarding_reward",
