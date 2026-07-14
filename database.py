@@ -22,6 +22,7 @@ def default_user_fields(user_id: str, email: str, balance: float, is_vip: bool =
         "isVip": is_vip,
         "accountStatus": "ACTIVE",
         "dailyStreak": 1,
+        "onboarding_stage": 0,
         "createdAt": _now_iso(),
         "referralsCount": 0,
         "referralCommissionEarned": 0,

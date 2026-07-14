@@ -302,6 +302,22 @@ def complete_onboarding(body: OnboardingRequest, user: dict[str, Any] = Depends(
 
     if body.isFinalStep:
         user["onboardingCompleted"] = True
+        if not user.get("ob_m1_done"):
+            user["ob_m1_done"] = True
+            user["balance"] = float(user.get("balance", 0)) + 100
+            user["earnings"] = float(user.get("earnings", 0)) + 100
+            user["onboarding_stage"] = user.get("onboarding_stage", 0) + 1
+            history = user.get("earningsHistory", [])
+            tx_id = f"TX_OBM1_{int(datetime.now(timezone.utc).timestamp())}_{uuid.uuid4().hex[:4]}"
+            history.append({
+                "id": tx_id,
+                "type": "onboarding_milestone_1",
+                "name": "Welcome Bonus: Profile Completion",
+                "amount": 100,
+                "date": datetime.now(timezone.utc).isoformat(),
+                "status": "Paid"
+            })
+            user["earningsHistory"] = history
         
     return save_user(user)
 
@@ -370,6 +386,50 @@ def complete_task(body: TaskCompleteRequest, user: dict[str, Any] = Depends(get_
     if isinstance(history, dict):
         history = []
     history.append({"task": body.task_type, "amount": reward, "at": datetime.now(timezone.utc).isoformat()})
+    
+    # Onboarding Milestones Check
+    m2_tasks = ["socialFollow", "socialMicro", "social"]
+    m3_tasks = ["articleRead", "shortlink", "article", "cpaInstall"]
+    m4_tasks = ["dailyBonus"]
+    
+    milestone_reward = 0
+    m_name = ""
+    m_type = ""
+    
+    if body.task_type in m2_tasks and not user.get("ob_m2_done"):
+        user["ob_m2_done"] = True
+        milestone_reward = 300
+        m_name = "Welcome Bonus: First Social Task"
+        m_type = "onboarding_milestone_2"
+        user["onboarding_stage"] = user.get("onboarding_stage", 0) + 1
+    elif body.task_type in m3_tasks and not user.get("ob_m3_done"):
+        user["ob_m3_done"] = True
+        milestone_reward = 300
+        m_name = "Welcome Bonus: Core Channel Engagement"
+        m_type = "onboarding_milestone_3"
+        user["onboarding_stage"] = user.get("onboarding_stage", 0) + 1
+    elif body.task_type in m4_tasks and not user.get("ob_m4_done"):
+        user["ob_m4_done"] = True
+        milestone_reward = 300
+        m_name = "Welcome Bonus: Retention Streak"
+        m_type = "onboarding_milestone_4"
+        user["onboarding_stage"] = user.get("onboarding_stage", 0) + 1
+
+    if milestone_reward > 0:
+        user["balance"] = float(user.get("balance", 0)) + milestone_reward
+        user["earnings"] = float(user.get("earnings", 0)) + milestone_reward
+        tx_id = f"TX_OBM_{int(datetime.now(timezone.utc).timestamp())}_{uuid.uuid4().hex[:4]}"
+        history.append({
+            "id": tx_id,
+            "type": m_type,
+            "name": m_name,
+            "amount": milestone_reward,
+            "date": datetime.now(timezone.utc).isoformat(),
+            "status": "Paid"
+        })
+        ledger["grossWc"] = ledger.get("grossWc", 0) + milestone_reward
+        ledger["userWc"] = ledger.get("userWc", 0) + milestone_reward
+
     user["earningsHistory"] = history
 
     return save_user(user)
