@@ -235,7 +235,7 @@ def get_me(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     thirty_days_ago = now - timedelta(days=30)
-    history = user.get("earningHistory") or []
+    history = user.get("earningsHistory") or user.get("earningHistory") or []
     def _ts(e):
         t = e.get("timestamp") or e.get("date")
         if t is None:
@@ -366,11 +366,11 @@ def complete_task(body: TaskCompleteRequest, user: dict[str, Any] = Depends(get_
     ledger["grossWc"] = ledger.get("grossWc", 0) + reward
     ledger["userWc"] = ledger.get("userWc", 0) + reward
 
-    history = user.setdefault("earningHistory", [])
+    history = user.get("earningsHistory") or user.get("earningHistory") or []
     if isinstance(history, dict):
         history = []
-        user["earningHistory"] = history
     history.append({"task": body.task_type, "amount": reward, "at": datetime.now(timezone.utc).isoformat()})
+    user["earningsHistory"] = history
 
     return save_user(user)
 
