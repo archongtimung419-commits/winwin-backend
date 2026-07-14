@@ -288,15 +288,16 @@ def complete_onboarding(body: OnboardingRequest, user: dict[str, Any] = Depends(
         user["balance"] = user.get("balance", 0) + reward
         user["total_earnings"] = user.get("total_earnings", 0) + reward
 
-        eh = user.get("earningHistory", {})
-        tx_id = f"tx_{uuid.uuid4().hex[:8]}"
-        eh[tx_id] = {
-            "type": "ONBOARDING",
-            "amount": reward,
-            "desc": "Profile Setup Reward",
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }
-        user["earningHistory"] = eh
+        history = user.setdefault("earningHistory", [])
+        if isinstance(history, list):
+            history.append({
+                "id": f"tx_{uuid.uuid4().hex[:8]}",
+                "type": "ONBOARDING",
+                "amount": reward,
+                "desc": "Profile Setup Reward",
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
+            user["earningHistory"] = history
 
     user["onboardingCompleted"] = True
     save_user(user)
