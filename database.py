@@ -93,7 +93,7 @@ def default_user_fields(user_id: str, email: str, balance: float, is_vip: bool =
         "cooldowns": {},
         "lotteryTickets": 0,
         "notifications": [],
-        "earningHistory": [],
+        "earningsHistory": [],
     }
     base.update(god_mode_sign(user_id, balance, is_vip, "ACTIVE", 1, GOD_MODE_SALT, HMAC_SECRET_KEY))
     return base

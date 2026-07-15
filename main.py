@@ -235,7 +235,12 @@ def get_me(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     thirty_days_ago = now - timedelta(days=30)
-    history = user.get("earningsHistory") or user.get("earningHistory") or []
+    hist1 = user.get("earningsHistory") or []
+    hist2 = user.get("earningHistory") or []
+    if isinstance(hist1, dict): hist1 = []
+    if isinstance(hist2, dict): hist2 = []
+    history = hist1 + hist2
+    user.pop("earningHistory", None)
     def _ts(e):
         t = e.get("timestamp") or e.get("date")
         if t is None:
@@ -383,7 +388,12 @@ TASK_REWARDS = {
 
 def process_milestones(user: dict, task_type: str):
     ledger = user.setdefault("ledger", {"grossWc": 0, "userWc": 0, "refWc": 0, "serverWc": 0, "profitWc": 0})
-    history = user.get("earningsHistory") or user.get("earningHistory") or []
+    hist1 = user.get("earningsHistory") or []
+    hist2 = user.get("earningHistory") or []
+    if isinstance(hist1, dict): hist1 = []
+    if isinstance(hist2, dict): hist2 = []
+    history = hist1 + hist2
+    user.pop("earningHistory", None)
     if isinstance(history, dict): history = []
     
     milestone_reward = 0
@@ -488,9 +498,15 @@ def complete_task(body: TaskCompleteRequest, user: dict[str, Any] = Depends(get_
         ledger["grossWc"] = ledger.get("grossWc", 0) + reward
         ledger["userWc"] = ledger.get("userWc", 0) + reward
 
-        history = user.get("earningsHistory") or user.get("earningHistory") or []
+        hist1 = user.get("earningsHistory") or []
+    hist2 = user.get("earningHistory") or []
+    if isinstance(hist1, dict): hist1 = []
+    if isinstance(hist2, dict): hist2 = []
+    history = hist1 + hist2
+    user.pop("earningHistory", None)
         if isinstance(history, dict): history = []
         history.append({"task": "dailyBonus", "amount": reward, "at": datetime.now(timezone.utc).isoformat()})
+        user["earningsHistory"] = history
         process_milestones(user, "dailyBonus")
         
         saved_user = save_user(user)
@@ -527,10 +543,16 @@ def complete_task(body: TaskCompleteRequest, user: dict[str, Any] = Depends(get_
     ledger["grossWc"] = ledger.get("grossWc", 0) + reward
     ledger["userWc"] = ledger.get("userWc", 0) + reward
 
-    history = user.get("earningsHistory") or user.get("earningHistory") or []
+    hist1 = user.get("earningsHistory") or []
+    hist2 = user.get("earningHistory") or []
+    if isinstance(hist1, dict): hist1 = []
+    if isinstance(hist2, dict): hist2 = []
+    history = hist1 + hist2
+    user.pop("earningHistory", None)
     if isinstance(history, dict):
         history = []
     history.append({"task": body.task_type, "amount": reward, "at": datetime.now(timezone.utc).isoformat()})
+    user["earningsHistory"] = history
     
     process_milestones(user, body.task_type)
     return save_user(user)
@@ -727,7 +749,12 @@ def timewall_postback(request: Request) -> dict[str, Any]:
     if not user:
         return {"status": "ok", "message": "Ignored: User not found"}
         
-    history = user.get("earningsHistory") or user.get("earningHistory") or []
+    hist1 = user.get("earningsHistory") or []
+    hist2 = user.get("earningHistory") or []
+    if isinstance(hist1, dict): hist1 = []
+    if isinstance(hist2, dict): hist2 = []
+    history = hist1 + hist2
+    user.pop("earningHistory", None)
     ledger = user.setdefault("ledger", {"grossWc": 0, "userWc": 0, "refWc": 0, "serverWc": 0, "profitWc": 0})
     
     if type_val == "credit":
