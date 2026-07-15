@@ -452,6 +452,10 @@ def complete_task(body: TaskCompleteRequest, user: dict[str, Any] = Depends(get_
             reward = random.randint(400, 600)
         else: reward = 50
         
+        is_vip = user.get("isVip", False)
+        if not is_vip:
+            reward = int(reward / 2)
+        
         user["balance"] = float(user.get("balance", 0)) + reward
         ledger = user.setdefault("ledger", {"grossWc": 0, "userWc": 0, "refWc": 0, "serverWc": 0, "profitWc": 0})
         ledger["grossWc"] = ledger.get("grossWc", 0) + reward
@@ -468,12 +472,19 @@ def complete_task(body: TaskCompleteRequest, user: dict[str, Any] = Depends(get_
 
     if body.task_type == "lottery_ticket":
         cycle_id = body.metadata.get("cycleId")
-        if float(user.get("balance", 0.0)) < 100:
-            raise HTTPException(status_code=400, detail="Insufficient balance")
-        user["balance"] = float(user.get("balance", 0.0)) - 100
         if user.get("lotteryCycleId") != cycle_id:
             user["lotteryTickets"] = 0
             user["lotteryCycleId"] = cycle_id
+
+        is_vip = user.get("isVip", False)
+        max_tickets = 20 if is_vip else 6
+        if user.get("lotteryTickets", 0) >= max_tickets:
+            raise HTTPException(status_code=400, detail=f"Maximum tickets ({max_tickets}) reached for this week.")
+
+        if float(user.get("balance", 0.0)) < 100:
+            raise HTTPException(status_code=400, detail="Insufficient balance")
+        
+        user["balance"] = float(user.get("balance", 0.0)) - 100
         user["lotteryTickets"] = user.get("lotteryTickets", 0) + 1
         process_milestones(user, body.task_type)
         return save_user(user)
