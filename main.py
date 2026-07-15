@@ -274,16 +274,16 @@ def complete_onboarding(body: OnboardingRequest, user: dict[str, Any] = Depends(
     if body.name and not user.get("name"):
         user["username"] = body.name
         user["name"] = body.name
-        reward += 25
+        reward += 50
     if body.age and not user.get("age"):
         user["age"] = body.age
-        reward += 25
+        reward += 50
     if body.gender and not user.get("gender"):
         user["gender"] = body.gender
-        reward += 25
+        reward += 50
     if body.state and not user.get("state"):
         user["state"] = body.state
-        reward += 25
+        reward += 50
 
     if reward > 0:
         user["balance"] = user.get("balance", 0.0) + float(reward)
@@ -354,64 +354,49 @@ TASK_REWARDS = {
 }
 
 
-@app.post("/api/tasks/complete")
-def complete_task(body: TaskCompleteRequest, user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
-    verify_user_active(user)
-
-    if body.task_type == "lottery_ticket":
-        cycle_id = body.metadata.get("cycleId")
-        if float(user.get("balance", 0.0)) < 100:
-            raise HTTPException(status_code=400, detail="Insufficient balance")
-        user["balance"] = float(user.get("balance", 0.0)) - 100
-        if user.get("lotteryCycleId") != cycle_id:
-            user["lotteryTickets"] = 0
-            user["lotteryCycleId"] = cycle_id
-        user["lotteryTickets"] = user.get("lotteryTickets", 0) + 1
-        return save_user(user)
-
-    reward = TASK_REWARDS.get(body.task_type)
-    if reward is None:
-        raise HTTPException(status_code=400, detail=f"Unknown task type: {body.task_type}")
-    if reward <= 0:
-        raise HTTPException(status_code=400, detail="Invalid reward amount.")
-
-    user["balance"] = float(user.get("balance", 0)) + reward
+def process_milestones(user: dict, task_type: str):
     ledger = user.setdefault("ledger", {"grossWc": 0, "userWc": 0, "refWc": 0, "serverWc": 0, "profitWc": 0})
-    ledger["grossWc"] = ledger.get("grossWc", 0) + reward
-    ledger["userWc"] = ledger.get("userWc", 0) + reward
-
     history = user.get("earningsHistory") or user.get("earningHistory") or []
-    if isinstance(history, dict):
-        history = []
-    history.append({"task": body.task_type, "amount": reward, "at": datetime.now(timezone.utc).isoformat()})
-    
-    # Onboarding Milestones Check
-    m2_tasks = ["socialFollow", "socialMicro", "social"]
-    m3_tasks = ["articleRead", "shortlink", "article", "cpaInstall"]
-    m4_tasks = ["dailyBonus"]
+    if isinstance(history, dict): history = []
     
     milestone_reward = 0
     m_name = ""
     m_type = ""
     
-    if body.task_type in m2_tasks and not user.get("ob_m2_done"):
-        user["ob_m2_done"] = True
-        milestone_reward = 300
-        m_name = "Welcome Bonus: First Social Task"
-        m_type = "onboarding_milestone_2"
-        user["onboarding_stage"] = user.get("onboarding_stage", 0) + 1
-    elif body.task_type in m3_tasks and not user.get("ob_m3_done"):
-        user["ob_m3_done"] = True
-        milestone_reward = 300
-        m_name = "Welcome Bonus: Core Channel Engagement"
-        m_type = "onboarding_milestone_3"
-        user["onboarding_stage"] = user.get("onboarding_stage", 0) + 1
-    elif body.task_type in m4_tasks and not user.get("ob_m4_done"):
-        user["ob_m4_done"] = True
-        milestone_reward = 300
-        m_name = "Welcome Bonus: Retention Streak"
-        m_type = "onboarding_milestone_4"
-        user["onboarding_stage"] = user.get("onboarding_stage", 0) + 1
+    if task_type in ["articleRead", "article"]:
+        user["articles_count"] = user.get("articles_count", 0) + 1
+        if user["articles_count"] >= 2 and not user.get("ob_m2_done"):
+            user["ob_m2_done"] = True
+            milestone_reward = 200
+            m_name = "Welcome Bonus: Complete 2 Articles"
+            m_type = "onboarding_milestone_2"
+            user["onboarding_stage"] = user.get("onboarding_stage", 0) + 1
+            
+    elif task_type in ["shortlink"]:
+        user["shortlinks_count"] = user.get("shortlinks_count", 0) + 1
+        if user["shortlinks_count"] >= 2 and not user.get("ob_m3_done"):
+            user["ob_m3_done"] = True
+            milestone_reward = 200
+            m_name = "Welcome Bonus: Complete 2 Shortlinks"
+            m_type = "onboarding_milestone_3"
+            user["onboarding_stage"] = user.get("onboarding_stage", 0) + 1
+
+    elif task_type == "lottery_ticket":
+        user["lottery_buy_count"] = user.get("lottery_buy_count", 0) + 1
+        if user["lottery_buy_count"] >= 2 and not user.get("ob_m4_done"):
+            user["ob_m4_done"] = True
+            milestone_reward = 200
+            m_name = "Welcome Bonus: Buy 2 Lottery Tickets"
+            m_type = "onboarding_milestone_4"
+            user["onboarding_stage"] = user.get("onboarding_stage", 0) + 1
+
+    elif task_type in ["dailyBonus"]:
+        if not user.get("ob_m5_done"):
+            user["ob_m5_done"] = True
+            milestone_reward = 200
+            m_name = "Welcome Bonus: Claim Daily Streak"
+            m_type = "onboarding_milestone_5"
+            user["onboarding_stage"] = user.get("onboarding_stage", 0) + 1
 
     if milestone_reward > 0:
         user["balance"] = float(user.get("balance", 0)) + milestone_reward
@@ -430,6 +415,39 @@ def complete_task(body: TaskCompleteRequest, user: dict[str, Any] = Depends(get_
 
     user["earningsHistory"] = history
 
+@app.post("/api/verify-task")
+def complete_task(body: TaskCompleteRequest, user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+    verify_user_active(user)
+
+    if body.task_type == "lottery_ticket":
+        cycle_id = body.metadata.get("cycleId")
+        if float(user.get("balance", 0.0)) < 100:
+            raise HTTPException(status_code=400, detail="Insufficient balance")
+        user["balance"] = float(user.get("balance", 0.0)) - 100
+        if user.get("lotteryCycleId") != cycle_id:
+            user["lotteryTickets"] = 0
+            user["lotteryCycleId"] = cycle_id
+        user["lotteryTickets"] = user.get("lotteryTickets", 0) + 1
+        process_milestones(user, body.task_type)
+        return save_user(user)
+
+    reward = TASK_REWARDS.get(body.task_type)
+    if reward is None:
+        raise HTTPException(status_code=400, detail=f"Unknown task type: {body.task_type}")
+    if reward <= 0:
+        raise HTTPException(status_code=400, detail="Invalid reward amount.")
+
+    user["balance"] = float(user.get("balance", 0)) + reward
+    ledger = user.setdefault("ledger", {"grossWc": 0, "userWc": 0, "refWc": 0, "serverWc": 0, "profitWc": 0})
+    ledger["grossWc"] = ledger.get("grossWc", 0) + reward
+    ledger["userWc"] = ledger.get("userWc", 0) + reward
+
+    history = user.get("earningsHistory") or user.get("earningHistory") or []
+    if isinstance(history, dict):
+        history = []
+    history.append({"task": body.task_type, "amount": reward, "at": datetime.now(timezone.utc).isoformat()})
+    
+    process_milestones(user, body.task_type)
     return save_user(user)
 
 
