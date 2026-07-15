@@ -278,6 +278,9 @@ def upgrade_to_pro(user: dict[str, Any] = Depends(get_current_user)) -> dict[str
     if user.get("balance", 0) < cost:
         raise HTTPException(status_code=400, detail=f"Insufficient balance. Need {cost} ₩.")
         
+    if "earnings" not in user:
+        user["earnings"] = user.get("balance", 0)
+    
     user["balance"] -= cost
     user["isVip"] = True
     
@@ -285,7 +288,7 @@ def upgrade_to_pro(user: dict[str, Any] = Depends(get_current_user)) -> dict[str
     history.append({
         "type": "UPGRADE_FEE",
         "amount": -cost,
-        "timestamp": _now_iso(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "source": "PRO Upgrade"
     })
     user["earningsHistory"] = history
