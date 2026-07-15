@@ -673,96 +673,84 @@ def timewall_postback(request: Request) -> dict[str, Any]:
     save_user(user)
     return {"status": "ok"}
 
-
-# -- Lottery & Admin Features --------------------------------------------------
+# ── Automated Lottery System ────────────────────────────────────────────────
 import random
+import time
+import datetime
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 
-GLOBAL_LOTTERY_STATE = {
-    "live_draw_active": False,
-    "last_winner": None,
-    "announcement": None
-}
+def get_current_cycle_id() -> str:
+    from datetime import datetime as dt, timedelta, timezone
+    now = dt.now(timezone.utc)
+    day = now.weekday()
+    diff_to_monday = -6 if day == 6 else (0 - day)
+    last_monday = now + timedelta(days=diff_to_monday)
+    return f"{last_monday.year}-{last_monday.month}-{last_monday.day}"
 
-class LotterySpinRequest(BaseModel):
-    cycleId: str
-
-@app.get("/api/admin/lottery/pool")
-def get_lottery_pool(cycleId: str) -> dict[str, Any]:
-    users = get_all_users()
-    free_tickets = 0
-    pro_tickets = 0
-    participants = []
+def perform_automated_draw():
+    cycle_id = get_current_cycle_id()
+    users = list_all_users()
+    tickets = []
     
     for u in users:
-        if u.get("lotteryCycleId") == cycleId and u.get("lotteryTickets", 0) > 0:
-            tickets = u.get("lotteryTickets", 0)
-            is_vip = u.get("isVip", False)
-            if is_vip:
-                pro_tickets += tickets
-            else:
-                free_tickets += tickets
-            participants.append({
-                "uid": u["uid"],
-                "username": u.get("username", "Unknown"),
-                "tickets": tickets,
-                "isVip": is_vip
-            })
-            
-    return {
-        "freeTickets": free_tickets,
-        "proTickets": pro_tickets,
-        "totalTickets": free_tickets + pro_tickets,
-        "prizePool": (free_tickets + pro_tickets) * 70,
-        "participants": participants
-    }
-
-@app.post("/api/admin/lottery/spin")
-def spin_lottery(body: LotterySpinRequest) -> dict[str, Any]:
-    users = get_all_users()
-    weighted_pool = []
-    total_tickets = 0
-    
-    for u in users:
-        if u.get("lotteryCycleId") == body.cycleId and u.get("lotteryTickets", 0) > 0:
-            tickets = u.get("lotteryTickets", 0)
-            total_tickets += tickets
-            weight = 70 if u.get("isVip", False) else 30
-            for _ in range(tickets * weight):
-                weighted_pool.append(u)
+        history = u.get("earningsHistory", [])
+        if isinstance(history, list) and any(f"Lottery Win ({cycle_id})" in h.get("type", "") for h in history if isinstance(h, dict)):
+            return # Already drawn for this cycle
+        
+        u_cycle = u.get("lotteryCycleId")
+        u_tickets = u.get("lotteryTickets", 0)
+        
+        if u_cycle == cycle_id and u_tickets > 0:
+            is_pro = u.get("isPro", False)
+            for _ in range(u_tickets):
+                tickets.append((u.get("email"), is_pro))
                 
-    if not weighted_pool:
-        raise HTTPException(status_code=400, detail="No participants in this cycle.")
-        
-    winner_dict = random.choice(weighted_pool)
-    prize = total_tickets * 70
-    
-    winner_tuple = get_user(winner_dict["uid"])
-    if not winner_tuple:
-        raise HTTPException(status_code=400, detail="Winner not found in DB.")
-        
-    winner = winner_tuple[0]
-    winner["balance"] = float(winner.get("balance", 0.0)) + prize
-    winner["lotteryCycleId"] = "won_" + body.cycleId  # mark as claimed
-    save_user(winner)
-    
-    winner_info = {
-        "username": winner.get("username", "Unknown"),
-        "prize": prize,
-        "uid": winner["uid"]
-    }
-    
-    GLOBAL_LOTTERY_STATE["last_winner"] = winner_info
-    return {"winner": winner_info}
+    if not tickets:
+        return
 
-class AnnouncementRequest(BaseModel):
-    message: str
+    pool = len(tickets) * 100
+    weighted_pool = []
+    for email, is_pro in tickets:
+        if email:
+            weight = 70 if is_pro else 30
+            weighted_pool.extend([email] * weight)
 
-@app.post("/api/admin/lottery/announce")
-def set_announcement(body: AnnouncementRequest) -> dict[str, str]:
-    GLOBAL_LOTTERY_STATE["announcement"] = body.message
-    GLOBAL_LOTTERY_STATE["live_draw_active"] = True
-    return {"status": "ok"}
+    unique_winners = []
+    num_winners = min(10, len(set([t[0] for t in tickets if t[0]])))
 
-@app.get("/api/lottery/state")
-def get_lottery_state() -> dict[str, Any]:
-    return GLOBAL_LOTTERY_STATE
+    if not weighted_pool or num_winners == 0:
+        return
+
+    while len(unique_winners) < num_winners:
+        winner = random.choice(weighted_pool)
+        if winner not in unique_winners:
+            unique_winners.append(winner)
+
+    prize_per_winner = int(pool / num_winners)
+
+    for i, email in enumerate(unique_winners):
+        winner_user = next((u for u in users if u.get("email") == email), None)
+        if winner_user:
+            balance = float(winner_user.get("balance", 0.0))
+            winner_user["balance"] = balance + prize_per_winner
+            
+            history = winner_user.get("earningsHistory", [])
+            if not isinstance(history, list):
+                history = []
+            history.insert(0, {
+                "id": f"{int(time.time())}_{i}",
+                "type": f"Lottery Win ({cycle_id}) Rank {i+1}",
+                "amount": prize_per_winner,
+                "date": datetime.datetime.now().isoformat()
+            })
+            winner_user["earningsHistory"] = history
+            try:
+                save_user(winner_user)
+            except Exception as e:
+                print(f"Error saving user {email}: {e}")
+
+scheduler = BackgroundScheduler()
+# Run weekly on Sunday night at 23:59 so Monday gets a new cycle ID and draw is finished.
+scheduler.add_job(perform_automated_draw, CronTrigger(day_of_week='sun', hour=23, minute=59))
+scheduler.start()
