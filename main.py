@@ -242,7 +242,7 @@ def get_me(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
     history = hist1 + hist2
     user.pop("earningHistory", None)
     def _ts(e):
-        t = e.get("timestamp") or e.get("date")
+        t = e.get("timestamp") or e.get("date") or e.get("at")
         if t is None:
             return None
         if isinstance(t, (int, float)):
@@ -373,16 +373,16 @@ def update_profile(body: UpdateProfileRequest, user: dict[str, Any] = Depends(ge
 # ── Task reward config ───────────────────────────────────────────────────────
 
 TASK_REWARDS = {
-    "videoAd": 3,
-    "articleRead": 3,
-    "directLink": 3,
-    "socialFollow": 28,
+    "videoAd": 30,
+    "articleRead": 30,
+    "directLink": 30,
+    "socialFollow": 10,
     "googleGig": 200,
     "webMicroGig": 200,
     "casualGame": 5,
     "socialMicro": 15,
     "customTask": 300,
-    "cpaCPL": 500,
+    "cpaCPL": 200,
 }
 
 
@@ -507,6 +507,10 @@ def complete_task(body: TaskCompleteRequest, user: dict[str, Any] = Depends(get_
         if isinstance(history, dict): history = []
         history.append({"task": "dailyBonus", "amount": reward, "at": datetime.now(timezone.utc).isoformat()})
         user["earningsHistory"] = history
+        user["todays_earnings"] = user.get("todays_earnings", 0) + reward
+        user["last_30_days"] = user.get("last_30_days", 0) + reward
+        user["earnings"] = user.get("balance", 0)
+        
         process_milestones(user, "dailyBonus")
         
         saved_user = save_user(user)
@@ -553,6 +557,10 @@ def complete_task(body: TaskCompleteRequest, user: dict[str, Any] = Depends(get_
         history = []
     history.append({"task": body.task_type, "amount": reward, "at": datetime.now(timezone.utc).isoformat()})
     user["earningsHistory"] = history
+    
+    user["todays_earnings"] = user.get("todays_earnings", 0) + reward
+    user["last_30_days"] = user.get("last_30_days", 0) + reward
+    user["earnings"] = user.get("balance", 0)
     
     process_milestones(user, body.task_type)
     return save_user(user)
