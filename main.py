@@ -262,6 +262,33 @@ def update_me(body: UserMeUpdateRequest, user: dict[str, Any] = Depends(get_curr
     return save_user(user)
 
 
+@app.post("/api/users/upgrade")
+def upgrade_to_pro(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+    verify_user_active(user)
+    cost = 499
+    
+    if user.get("isVip"):
+        raise HTTPException(status_code=400, detail="Already a PRO user")
+        
+    if user.get("balance", 0) < cost:
+        raise HTTPException(status_code=400, detail=f"Insufficient balance. Need {cost} ₩.")
+        
+    user["balance"] -= cost
+    user["isVip"] = True
+    
+    history = user.get("earningsHistory") or []
+    history.append({
+        "type": "UPGRADE_FEE",
+        "amount": -cost,
+        "timestamp": _now_iso(),
+        "source": "PRO Upgrade"
+    })
+    user["earningsHistory"] = history
+    
+    save_user(user)
+    return {"status": "success", "message": "Upgraded to PRO successfully"}
+
+
 import uuid
 
 @app.post("/api/users/onboarding")
