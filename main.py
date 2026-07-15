@@ -509,7 +509,10 @@ def complete_task(body: TaskCompleteRequest, user: dict[str, Any] = Depends(get_
         user["earningsHistory"] = history
         user["todays_earnings"] = user.get("todays_earnings", 0) + reward
         user["last_30_days"] = user.get("last_30_days", 0) + reward
-        user["earnings"] = user.get("balance", 0)
+        # Safely increment lifetime earnings
+        current_earnings = user.get("earnings", user.get("balance", 0))
+        user["earnings"] = current_earnings + reward
+        user["lifetimeEarnings"] = user.get("earnings")
         
         process_milestones(user, "dailyBonus")
         
@@ -571,7 +574,15 @@ def complete_task(body: TaskCompleteRequest, user: dict[str, Any] = Depends(get_
     
     user["todays_earnings"] = user.get("todays_earnings", 0) + reward
     user["last_30_days"] = user.get("last_30_days", 0) + reward
-    user["earnings"] = user.get("balance", 0)
+    
+    current_earnings = user.get("earnings", user.get("balance", 0))
+    # If the current balance is somehow larger (e.g. from admin add), we can sync it
+    if user.get("balance", 0) > current_earnings:
+        current_earnings = user.get("balance", 0) - reward # Base before this reward
+        if current_earnings < 0: current_earnings = 0
+        
+    user["earnings"] = current_earnings + reward
+    user["lifetimeEarnings"] = user.get("earnings")
     
     process_milestones(user, body.task_type)
     return save_user(user)
