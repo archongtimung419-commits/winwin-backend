@@ -99,18 +99,7 @@ def default_user_fields(user_id: str, email: str, balance: float, is_vip: bool =
     return base
 
 
-@contextmanager
-def get_conn():
-    conn = sqlite3.connect(DATABASE_PATH)
-    conn.row_factory = sqlite3.Row
-    try:
-        yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+
 
 
 def init_db() -> None:
