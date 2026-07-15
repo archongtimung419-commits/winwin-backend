@@ -419,6 +419,53 @@ def process_milestones(user: dict, task_type: str):
 def complete_task(body: TaskCompleteRequest, user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
     verify_user_active(user)
 
+    if body.task_type == "dailyBonus":
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        last_claim = user.get("lastDailyClaimDate", "")
+        if last_claim == today_str:
+            raise HTTPException(status_code=400, detail="Already claimed today")
+        
+        try:
+            last_date = datetime.strptime(last_claim, "%Y-%m-%d").date()
+            today_date = datetime.strptime(today_str, "%Y-%m-%d").date()
+            if (today_date - last_date).days == 1:
+                streak = user.get("dailyStreak", 0) + 1
+            else:
+                streak = 1
+        except Exception:
+            streak = 1
+            
+        if streak > 7:
+            streak = 1
+            
+        user["dailyStreak"] = streak
+        user["lastDailyClaimDate"] = today_str
+        
+        if streak == 1: reward = 50
+        elif streak == 2: reward = 100
+        elif streak == 3: reward = 150
+        elif streak == 4: reward = 200
+        elif streak == 5: reward = 300
+        elif streak == 6: reward = 400
+        elif streak == 7: 
+            import random
+            reward = random.randint(400, 600)
+        else: reward = 50
+        
+        user["balance"] = float(user.get("balance", 0)) + reward
+        ledger = user.setdefault("ledger", {"grossWc": 0, "userWc": 0, "refWc": 0, "serverWc": 0, "profitWc": 0})
+        ledger["grossWc"] = ledger.get("grossWc", 0) + reward
+        ledger["userWc"] = ledger.get("userWc", 0) + reward
+
+        history = user.get("earningsHistory") or user.get("earningHistory") or []
+        if isinstance(history, dict): history = []
+        history.append({"task": "dailyBonus", "amount": reward, "at": datetime.now(timezone.utc).isoformat()})
+        process_milestones(user, "dailyBonus")
+        
+        saved_user = save_user(user)
+        saved_user["_latestReward"] = reward
+        return saved_user
+
     if body.task_type == "lottery_ticket":
         cycle_id = body.metadata.get("cycleId")
         if float(user.get("balance", 0.0)) < 100:
