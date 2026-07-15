@@ -546,6 +546,17 @@ def complete_task(body: TaskCompleteRequest, user: dict[str, Any] = Depends(get_
     ledger = user.setdefault("ledger", {"grossWc": 0, "userWc": 0, "refWc": 0, "serverWc": 0, "profitWc": 0})
     ledger["grossWc"] = ledger.get("grossWc", 0) + reward
     ledger["userWc"] = ledger.get("userWc", 0) + reward
+    
+    if body.task_type == "videoAd":
+        user["videoAdsCompleted"] = user.get("videoAdsCompleted", 0) + 1
+    elif body.task_type in ["articleRead", "article"]:
+        user["completed_articles_count"] = user.get("completed_articles_count", 0) + 1
+    elif body.task_type in ["directLink", "shortlink"]:
+        user["directLinksCompleted"] = user.get("directLinksCompleted", 0) + 1
+    elif body.task_type in ["socialFollow", "socialMicro"]:
+        user["socialTasksCompleted"] = user.get("socialTasksCompleted", 0) + 1
+    elif body.task_type in ["cpaCPL", "appInstall", "googleGig", "webMicroGig", "casualGame"]:
+        user["completed_app_installs"] = user.get("completed_app_installs", 0) + 1
 
     hist1 = user.get("earningsHistory") or []
     hist2 = user.get("earningHistory") or []
