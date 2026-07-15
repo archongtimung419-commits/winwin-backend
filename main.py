@@ -358,6 +358,17 @@ TASK_REWARDS = {
 def complete_task(body: TaskCompleteRequest, user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
     verify_user_active(user)
 
+    if body.task_type == "lottery_ticket":
+        cycle_id = body.metadata.get("cycleId")
+        if float(user.get("balance", 0.0)) < 100:
+            raise HTTPException(status_code=400, detail="Insufficient balance")
+        user["balance"] = float(user.get("balance", 0.0)) - 100
+        if user.get("lotteryCycleId") != cycle_id:
+            user["lotteryTickets"] = 0
+            user["lotteryCycleId"] = cycle_id
+        user["lotteryTickets"] = user.get("lotteryTickets", 0) + 1
+        return save_user(user)
+
     reward = TASK_REWARDS.get(body.task_type)
     if reward is None:
         raise HTTPException(status_code=400, detail=f"Unknown task type: {body.task_type}")
@@ -598,10 +609,9 @@ def timewall_postback(request: Request) -> dict[str, Any]:
     secret_key = "b6d96ae844a97a6ab08dcd152dedd2ad"
     concat_str = f"{userID}{revenue}{secret_key}"
     expected_hash = hashlib.sha256(concat_str.encode('utf-8')).hexdigest()
-    
-    if hash_val and hash_val != expected_hash:
-        return {"status": "ok", "message": "Ignored: Invalid hash"}
 
+    if not _hmac.compare_digest(hash_val, expected_hash):
+        return {"status": "error", "message": "Invalid hash"}
 
     user = get_user_by_id(userID)
     if not user:
@@ -610,7 +620,7 @@ def timewall_postback(request: Request) -> dict[str, Any]:
     history = user.get("earningsHistory") or user.get("earningHistory") or []
     ledger = user.setdefault("ledger", {"grossWc": 0, "userWc": 0, "refWc": 0, "serverWc": 0, "profitWc": 0})
     
-    if type == "credit":
+    if type_val == "credit":
         if any(h.get("id") == transactionID for h in history):
             return {"status": "ok", "message": "Already credited"}
 
@@ -663,3 +673,96 @@ def timewall_postback(request: Request) -> dict[str, Any]:
     save_user(user)
     return {"status": "ok"}
 
+
+# -- Lottery & Admin Features --------------------------------------------------
+import random
+
+GLOBAL_LOTTERY_STATE = {
+    "live_draw_active": False,
+    "last_winner": None,
+    "announcement": None
+}
+
+class LotterySpinRequest(BaseModel):
+    cycleId: str
+
+@app.get("/api/admin/lottery/pool")
+def get_lottery_pool(cycleId: str) -> dict[str, Any]:
+    users = get_all_users()
+    free_tickets = 0
+    pro_tickets = 0
+    participants = []
+    
+    for u in users:
+        if u.get("lotteryCycleId") == cycleId and u.get("lotteryTickets", 0) > 0:
+            tickets = u.get("lotteryTickets", 0)
+            is_vip = u.get("isVip", False)
+            if is_vip:
+                pro_tickets += tickets
+            else:
+                free_tickets += tickets
+            participants.append({
+                "uid": u["uid"],
+                "username": u.get("username", "Unknown"),
+                "tickets": tickets,
+                "isVip": is_vip
+            })
+            
+    return {
+        "freeTickets": free_tickets,
+        "proTickets": pro_tickets,
+        "totalTickets": free_tickets + pro_tickets,
+        "prizePool": (free_tickets + pro_tickets) * 70,
+        "participants": participants
+    }
+
+@app.post("/api/admin/lottery/spin")
+def spin_lottery(body: LotterySpinRequest) -> dict[str, Any]:
+    users = get_all_users()
+    weighted_pool = []
+    total_tickets = 0
+    
+    for u in users:
+        if u.get("lotteryCycleId") == body.cycleId and u.get("lotteryTickets", 0) > 0:
+            tickets = u.get("lotteryTickets", 0)
+            total_tickets += tickets
+            weight = 70 if u.get("isVip", False) else 30
+            for _ in range(tickets * weight):
+                weighted_pool.append(u)
+                
+    if not weighted_pool:
+        raise HTTPException(status_code=400, detail="No participants in this cycle.")
+        
+    winner_dict = random.choice(weighted_pool)
+    prize = total_tickets * 70
+    
+    winner_tuple = get_user(winner_dict["uid"])
+    if not winner_tuple:
+        raise HTTPException(status_code=400, detail="Winner not found in DB.")
+        
+    winner = winner_tuple[0]
+    winner["balance"] = float(winner.get("balance", 0.0)) + prize
+    winner["lotteryCycleId"] = "won_" + body.cycleId  # mark as claimed
+    save_user(winner)
+    
+    winner_info = {
+        "username": winner.get("username", "Unknown"),
+        "prize": prize,
+        "uid": winner["uid"]
+    }
+    
+    GLOBAL_LOTTERY_STATE["last_winner"] = winner_info
+    return {"winner": winner_info}
+
+class AnnouncementRequest(BaseModel):
+    message: str
+
+@app.post("/api/admin/lottery/announce")
+def set_announcement(body: AnnouncementRequest) -> dict[str, str]:
+    GLOBAL_LOTTERY_STATE["announcement"] = body.message
+    GLOBAL_LOTTERY_STATE["live_draw_active"] = True
+    return {"status": "ok"}
+
+@app.get("/api/lottery/state")
+def get_lottery_state() -> dict[str, Any]:
+    return GLOBAL_LOTTERY_STATE
