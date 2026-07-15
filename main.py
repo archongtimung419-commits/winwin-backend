@@ -415,7 +415,7 @@ def process_milestones(user: dict, task_type: str):
 
     user["earningsHistory"] = history
 
-@app.post("/api/verify-task")
+@app.post("/api/tasks/complete")
 def complete_task(body: TaskCompleteRequest, user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
     verify_user_active(user)
 
