@@ -499,11 +499,11 @@ def complete_task(body: TaskCompleteRequest, user: dict[str, Any] = Depends(get_
         ledger["userWc"] = ledger.get("userWc", 0) + reward
 
         hist1 = user.get("earningsHistory") or []
-    hist2 = user.get("earningHistory") or []
-    if isinstance(hist1, dict): hist1 = []
-    if isinstance(hist2, dict): hist2 = []
-    history = hist1 + hist2
-    user.pop("earningHistory", None)
+        hist2 = user.get("earningHistory") or []
+        if isinstance(hist1, dict): hist1 = []
+        if isinstance(hist2, dict): hist2 = []
+        history = hist1 + hist2
+        user.pop("earningHistory", None)
         if isinstance(history, dict): history = []
         history.append({"task": "dailyBonus", "amount": reward, "at": datetime.now(timezone.utc).isoformat()})
         user["earningsHistory"] = history
