@@ -200,6 +200,11 @@ def save_user(user: dict[str, Any], password_hash: str | None = None) -> dict[st
     return user
 
 
+def delete_user(user_id: str) -> None:
+    with get_conn() as conn:
+        conn.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
+
+
 def create_user(email: str, password_hash: str, referral_code: str = "", user_id: str = "") -> dict[str, Any]:
     if user_id and get_user_by_id(user_id):
         uid = f"usr_{uuid.uuid4().hex[:12]}"

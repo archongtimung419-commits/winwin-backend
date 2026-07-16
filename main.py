@@ -34,6 +34,7 @@ from database import (
     list_all_users,
     list_all_withdrawals,
     save_user,
+    delete_user,
     set_content_config,
     set_system_setting,
     update_withdrawal_status,
@@ -773,6 +774,15 @@ def admin_patch_user(user_id: str, body: AdminUserPatch, _: dict[str, Any] = Dep
     if body.remoteNotifications is not None:
         user.setdefault("notifications", []).extend(body.remoteNotifications)
     return save_user(user)
+
+
+@app.delete("/api/admin/users/{user_id}")
+def admin_delete_user_endpoint(user_id: str, _: dict[str, Any] = Depends(get_admin)) -> dict[str, str]:
+    user = get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    delete_user(user_id)
+    return {"status": "success", "message": "User deleted"}
 
 
 # ── Admin: Withdrawals ────────────────────────────────────────────────────────
