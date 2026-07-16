@@ -97,6 +97,9 @@ class AdminUserPatch(BaseModel):
     isVip: bool | None = None
     accountStatus: str | None = None
     dailyStreak: int | None = None
+    earnings: float | None = None
+    earningsHistory: list | None = None
+    remoteNotifications: list | None = None
 
 
 class UserSyncRequest(BaseModel):
@@ -616,6 +619,25 @@ def credit_referral(body: ReferralCreditRequest, user: dict[str, Any] = Depends(
     referrer["referralCommissionEarned"] = min(REFERRAL_CAP_WC, new_total)
     if added > 0:
         referrer["balance"] = float(referrer.get("balance", 0)) + added
+        ledger = referrer.setdefault("ledger", {"grossWc": 0, "userWc": 0, "refWc": 0, "serverWc": 0, "profitWc": 0})
+        ledger["grossWc"] = ledger.get("grossWc", 0) + added
+        ledger["refWc"] = ledger.get("refWc", 0) + added
+        
+        hist1 = referrer.get("earningsHistory") or []
+        hist2 = referrer.get("earningHistory") or []
+        if isinstance(hist1, dict): hist1 = []
+        if isinstance(hist2, dict): hist2 = []
+        history = hist1 + hist2
+        referrer.pop("earningHistory", None)
+        if isinstance(history, dict): history = []
+        
+        history.append({
+            "task": "referralBonus",
+            "amount": added,
+            "at": datetime.now(timezone.utc).isoformat()
+        })
+        referrer["earningsHistory"] = history
+
     save_user(referrer)
     return {"status": "credited", "added": str(added)}
 
@@ -724,6 +746,15 @@ def admin_patch_user(user_id: str, body: AdminUserPatch, _: dict[str, Any] = Dep
         user["accountStatus"] = body.accountStatus
     if body.dailyStreak is not None:
         user["dailyStreak"] = body.dailyStreak
+    if body.earnings is not None:
+        user["earnings"] = body.earnings
+        user["lifetimeEarnings"] = body.earnings
+        ledger = user.setdefault("ledger", {"grossWc": 0, "userWc": 0, "refWc": 0, "serverWc": 0, "profitWc": 0})
+        ledger["grossWc"] = body.earnings
+    if body.earningsHistory is not None:
+        user["earningsHistory"] = body.earningsHistory
+    if body.remoteNotifications is not None:
+        user.setdefault("notifications", []).extend(body.remoteNotifications)
     return save_user(user)
 
 
@@ -945,6 +976,9 @@ def perform_automated_draw():
         if winner_user:
             balance = float(winner_user.get("balance", 0.0))
             winner_user["balance"] = balance + prize_per_winner
+            ledger = winner_user.setdefault("ledger", {"grossWc": 0, "userWc": 0, "refWc": 0, "serverWc": 0, "profitWc": 0})
+            ledger["grossWc"] = ledger.get("grossWc", 0) + prize_per_winner
+            ledger["serverWc"] = ledger.get("serverWc", 0) + prize_per_winner
             
             history = winner_user.get("earningsHistory", [])
             if not isinstance(history, list):
