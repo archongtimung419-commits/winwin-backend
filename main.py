@@ -274,20 +274,23 @@ def update_me(body: UserMeUpdateRequest, user: dict[str, Any] = Depends(get_curr
 @app.post("/api/users/upgrade")
 def upgrade_to_pro(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
     verify_user_active(user)
-    val = get_system_setting("vipCost")
-    cost = int(val) if val is not None else 499
+    cfg = get_content_config() or {}
+    try:
+        cost = int(cfg.get("vipCost", 499))
+    except (ValueError, TypeError):
+        cost = 499
 
     
     if user.get("isVip"):
         raise HTTPException(status_code=400, detail="Already a PRO user")
         
-    if user.get("balance", 0) < cost:
+    if float(user.get("balance", 0)) < cost:
         raise HTTPException(status_code=400, detail=f"Insufficient balance. Need {cost} ₩.")
         
     if "earnings" not in user:
         user["earnings"] = user.get("balance", 0)
     
-    user["balance"] -= cost
+    user["balance"] = float(user.get("balance", 0)) - cost
     user["isVip"] = True
     
     history = user.get("earningsHistory") or []
@@ -647,8 +650,14 @@ def credit_referral(body: ReferralCreditRequest, user: dict[str, Any] = Depends(
 @app.post("/api/withdrawals")
 def submit_withdrawal(body: WithdrawalRequest, user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
     verify_user_active(user)
-    if body.amount < MIN_REDEEM_WC:
-        raise HTTPException(status_code=400, detail=f"Minimum redemption is {MIN_REDEEM_WC} WinCash.")
+    cfg = get_content_config() or {}
+    try:
+        min_redeem = int(cfg.get("minRedeem", MIN_REDEEM_WC))
+    except (ValueError, TypeError):
+        min_redeem = MIN_REDEEM_WC
+        
+    if body.amount < min_redeem:
+        raise HTTPException(status_code=400, detail=f"Minimum redemption is {min_redeem} WinCash.")
     if float(user.get("balance", 0)) < body.amount:
         raise HTTPException(status_code=400, detail="Insufficient balance.")
 
