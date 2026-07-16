@@ -752,7 +752,7 @@ def admin_patch_withdrawal(wid: str, body: WithdrawalStatusPatch, _: dict[str, A
         for w in w_list:
             if w.get("id") == wid:
                 w["status"] = body.status
-                amount_to_refund = w.get("gross_amount", result["amount"])
+                amount_to_refund = w.get("net_amount", result["amount"])
                 break
                 
         if body.status == "REJECTED":
