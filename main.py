@@ -774,6 +774,8 @@ def admin_patch_withdrawal(wid: str, body: WithdrawalStatusPatch, _: dict[str, A
     result = update_withdrawal_status(wid, body.status)
     if not result:
         raise HTTPException(status_code=404, detail="Withdrawal not found")
+    if result.get("_resolved"):
+        raise HTTPException(status_code=400, detail="Withdrawal is already resolved (PAID or REJECTED) and cannot be modified again.")
         
     user_id = result["userId"]
     user = get_user_by_id(user_id)

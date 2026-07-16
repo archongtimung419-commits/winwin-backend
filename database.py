@@ -286,6 +286,8 @@ def update_withdrawal_status(wid: str, new_status: str) -> dict[str, Any] | None
         row = conn.execute("SELECT * FROM withdrawals WHERE id = ?", (wid,)).fetchone()
         if not row:
             return None
+        if row["status"] in ["PAID", "REJECTED"]:
+            return {"_resolved": True}
         conn.execute("UPDATE withdrawals SET status = ? WHERE id = ?", (new_status, wid))
         return {
             "id": wid,
