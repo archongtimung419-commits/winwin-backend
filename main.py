@@ -628,7 +628,15 @@ def submit_withdrawal(body: WithdrawalRequest, user: dict[str, Any] = Depends(ge
         raise HTTPException(status_code=400, detail="Insufficient balance.")
 
     user["balance"] = float(user["balance"]) - body.amount
-    withdrawal = create_withdrawal(user["userId"], body.amount, body.method, body.account_details)
+    
+    fee = round(body.amount * 0.024, 2)
+    net_amount = body.amount - fee
+    
+    withdrawal = create_withdrawal(user["userId"], net_amount, body.method, body.account_details)
+    withdrawal["gross_amount"] = body.amount
+    withdrawal["fee"] = fee
+    withdrawal["net_amount"] = net_amount
+    
     user.setdefault("withdrawals", []).append(withdrawal)
     save_user(user)
     return {"withdrawal": withdrawal, "user": user}
@@ -734,6 +742,39 @@ def admin_patch_withdrawal(wid: str, body: WithdrawalStatusPatch, _: dict[str, A
     result = update_withdrawal_status(wid, body.status)
     if not result:
         raise HTTPException(status_code=404, detail="Withdrawal not found")
+        
+    user_id = result["userId"]
+    user = get_user_by_id(user_id)
+    if user:
+        w_list = user.get("withdrawals", [])
+        amount_to_refund = result["amount"]
+        
+        for w in w_list:
+            if w.get("id") == wid:
+                w["status"] = body.status
+                amount_to_refund = w.get("gross_amount", result["amount"])
+                break
+                
+        if body.status == "REJECTED":
+            user["balance"] = float(user.get("balance", 0)) + amount_to_refund
+            user.setdefault("notifications", []).append({
+                "id": f"notif_{uuid.uuid4().hex[:8]}",
+                "title": "Withdrawal Rejected",
+                "message": f"Your withdrawal of {amount_to_refund} ₩ has been rejected and refunded to your balance.",
+                "date": datetime.now(timezone.utc).isoformat(),
+                "read": False
+            })
+        elif body.status == "PAID":
+            user.setdefault("notifications", []).append({
+                "id": f"notif_{uuid.uuid4().hex[:8]}",
+                "title": "Withdrawal Paid",
+                "message": "Your withdrawal request has been successfully paid out!",
+                "date": datetime.now(timezone.utc).isoformat(),
+                "read": False
+            })
+            
+        save_user(user)
+        
     return result
 
 
