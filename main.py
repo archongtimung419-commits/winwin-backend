@@ -248,9 +248,10 @@ def get_me(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
         if isinstance(t, (int, float)):
             return datetime.fromtimestamp(t / 1000 if t > 1e12 else t, tz=timezone.utc)
         return datetime.fromisoformat(t.replace("Z", "+00:00")).replace(tzinfo=timezone.utc)
-    user["todays_earnings"] = sum(e.get("amount", 0) for e in history if _ts(e) and _ts(e) >= today_start)
-    user["last_30_days"] = sum(e.get("amount", 0) for e in history if _ts(e) and _ts(e) >= thirty_days_ago)
-    user["earnings"] = user.get("balance", 0)
+    user["todays_earnings"] = sum(e.get("amount", 0) for e in history if _ts(e) and _ts(e) >= today_start and e.get("amount", 0) > 0)
+    user["last_30_days"] = sum(e.get("amount", 0) for e in history if _ts(e) and _ts(e) >= thirty_days_ago and e.get("amount", 0) > 0)
+    ledger = user.get("ledger", {})
+    user["earnings"] = ledger.get("grossWc", user.get("balance", 0))
     user["offers_completed"] = (
         user.get("videoAdsCompleted", 0) + user.get("completed_articles_count", 0)
         + user.get("directLinksCompleted", 0) + user.get("socialTasksCompleted", 0)
