@@ -274,8 +274,9 @@ def update_me(body: UserMeUpdateRequest, user: dict[str, Any] = Depends(get_curr
 @app.post("/api/users/upgrade")
 def upgrade_to_pro(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
     verify_user_active(user)
-    cost = get_system_setting("vipCost", 499)
-    
+    val = get_system_setting("vipCost")
+    cost = int(val) if val is not None else 499
+
     
     if user.get("isVip"):
         raise HTTPException(status_code=400, detail="Already a PRO user")
