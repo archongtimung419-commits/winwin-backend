@@ -204,6 +204,12 @@ def update_system_status(body: SystemStatusUpdate, _: dict[str, Any] = Depends(g
     return {"mode": body.mode, "status": "updated"}
 
 
+@app.get("/api/cpa-apps")
+def get_cpa_apps() -> dict[str, Any]:
+    cfg = get_content_config() or {}
+    return {"status": "ok", "apps": cfg.get("cpa_apps", [])}
+
+
 # ── Auth routes ──────────────────────────────────────────────────────────────
 
 @app.post("/api/auth/register")
