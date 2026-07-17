@@ -63,12 +63,13 @@ def send_notification_email_sync(email: str, subject: str, html: str):
     if not email or "@" not in email:
         return
     try:
-        import requests
-        requests.post(
-            "https://winwinpro.xyz/api/send-notification-email",
-            json={"email": email, "subject": subject, "message_html": html},
-            timeout=10.0
-        )
+        import httpx
+        with httpx.Client() as client:
+            client.post(
+                "https://winwinpro.xyz/api/send-notification-email",
+                json={"email": email, "subject": subject, "message_html": html},
+                timeout=10.0
+            )
     except Exception as e:
         print(f"Failed to send email sync to {email}: {e}")
 
