@@ -205,7 +205,7 @@ def get_current_user(creds: HTTPAuthorizationCredentials | None = Depends(securi
 
 
 def verify_user_active(user: dict[str, Any]) -> None:
-    if user.get("accountStatus") != "ACTIVE" and user.get("accountStatus") != "BANNED":
+    if user.get("accountStatus") != "ACTIVE":
         raise HTTPException(status_code=403, detail="Account is not active.")
 
 def check_and_update_ip(user: dict[str, Any], ip: str | None) -> None:
@@ -305,6 +305,90 @@ def login(body: LoginRequest, request: Request) -> dict[str, Any]:
     check_and_update_ip(user, request.client.host if request.client else None)
     token = create_token(user["userId"], "user")
     return {"token": token, "user": user}
+
+
+# ── Forgot / Reset Password ──────────────────────────────────────────────────
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+
+@app.post("/api/auth/forgot-password")
+def forgot_password(body: ForgotPasswordRequest) -> dict[str, str]:
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+    from config import SMTP_EMAIL, SMTP_PASSWORD
+
+    found = get_user_by_email(body.email.lower())
+    if not found:
+        return {"message": "If an account with that email exists, a reset link has been sent."}
+
+    user, _ = found
+    reset_token = jwt.encode(
+        {"sub": user["userId"], "email": user["email"], "type": "password_reset",
+         "exp": datetime.now(timezone.utc) + timedelta(minutes=15)},
+        JWT_SECRET, algorithm=JWT_ALGORITHM,
+    )
+
+    reset_url = f"https://winwinpro.xyz/reset-password.html?token={reset_token}"
+
+    msg = MIMEMultipart()
+    msg['From'] = f"WinWin Pro <{SMTP_EMAIL}>"
+    msg['To'] = body.email
+    msg['Subject'] = "Reset Your WinWin Pro Password"
+
+    html = f"""
+    <html>
+      <body style="font-family: Arial, sans-serif; background-color: #08090d; padding: 20px;">
+        <div style="background-color: #12141d; padding: 30px; border-radius: 12px; max-width: 500px; margin: 0 auto; border: 1px solid rgba(16, 229, 138, 0.2);">
+          <h2 style="color: #10E58A; text-align: center; font-size: 24px; margin-bottom: 10px;">WinWin Pro</h2>
+          <p style="font-size: 16px; color: #fff;">Hello,</p>
+          <p style="font-size: 16px; color: #a1a1aa;">We received a request to reset your password. Click the button below to set a new password:</p>
+          <div style="text-align: center; margin: 25px 0;">
+            <a href="{reset_url}" style="background-color: #10E58A; color: #000; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 16px;">Reset Password</a>
+          </div>
+          <p style="font-size: 14px; color: #71717a;">This link will expire in 15 minutes. If you didn't request this, you can safely ignore this email.</p>
+        </div>
+      </body>
+    </html>
+    """
+    msg.attach(MIMEText(html, 'html'))
+
+    try:
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(SMTP_EMAIL, SMTP_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+    except Exception as e:
+        print("SMTP Error (forgot-password):", e)
+
+    return {"message": "If an account with that email exists, a reset link has been sent."}
+
+
+@app.post("/api/auth/reset-password")
+def reset_password(body: ResetPasswordRequest) -> dict[str, str]:
+    try:
+        payload = jwt.decode(body.token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    except JWTError:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset link.")
+
+    if payload.get("type") != "password_reset":
+        raise HTTPException(status_code=400, detail="Invalid token type.")
+
+    user_id = payload.get("sub")
+    found = get_user_by_email(payload.get("email", ""))
+    if not found or found[0]["userId"] != user_id:
+        raise HTTPException(status_code=400, detail="Invalid token.")
+
+    user, _ = found
+    save_user(user, pwd_context.hash(body.new_password))
+    return {"message": "Password reset successful. You can now log in."}
 
 
 # ── User routes ──────────────────────────────────────────────────────────────
@@ -763,8 +847,6 @@ def submit_withdrawal(body: WithdrawalRequest, user: dict[str, Any] = Depends(ge
     verify_user_active(user)
     if not user.get("emailVerified"):
         raise HTTPException(status_code=403, detail="You must verify your email address in User Info before you can cash out.")
-    if user.get("accountStatus") == "BANNED":
-        raise HTTPException(status_code=403, detail="Cashout currently paused right now, because your account is banned.")
     cfg = get_content_config() or {}
     try:
         min_redeem = int(cfg.get("minRedeem", MIN_REDEEM_WC))
@@ -793,15 +875,15 @@ def submit_withdrawal(body: WithdrawalRequest, user: dict[str, Any] = Depends(ge
 
 # ── OTP ──────────────────────────────────────────────────────────────────────
 
+_otp_store: dict[str, str] = {}
+
 @app.post("/api/otp/send")
 async def send_otp(body: OtpRequest) -> dict[str, Any]:
+    otp = str(100000 + int.from_bytes(__import__("os").urandom(3), "big") % 900000)
+    _otp_store[body.phone] = otp
     if not FAST2SMS_API_KEY:
-        # In mock mode, log OTP server-side only — never return to client
-        otp = str(100000 + int.from_bytes(__import__("os").urandom(3), "big") % 900000)
         print(f"[MOCK OTP] Phone: {body.phone}, OTP: {otp}")
         return {"success": True, "message": "OTP sent (mock mode)"}
-
-    otp = str(100000 + int.from_bytes(__import__("os").urandom(3), "big") % 900000)
 
     async with httpx.AsyncClient() as client:
         response = await client.post(
@@ -821,14 +903,27 @@ async def send_otp(body: OtpRequest) -> dict[str, Any]:
         return {"success": True, "message": "OTP sent"}
     raise HTTPException(status_code=400, detail=data.get("message", "Failed to send OTP"))
 
+class OtpVerifyRequest(BaseModel):
+    phone: str
+    otp: str
+
+@app.post("/api/otp/verify")
+def verify_otp(body: OtpVerifyRequest) -> dict[str, Any]:
+    expected = _otp_store.get(body.phone)
+    if not expected or expected != body.otp:
+        raise HTTPException(status_code=400, detail="Invalid or expired OTP")
+    del _otp_store[body.phone]
+    return {"success": True, "phone": body.phone}
+
 @app.post("/api/otp/email")
 def send_email_otp(body: EmailOtpRequest) -> dict[str, Any]:
     import smtplib
     from email.mime.text import MIMEText
     from email.mime.multipart import MIMEMultipart
 
-    sender_email = "winwinpro.xyz@gmail.com"
-    sender_password = "rxccnjxrbvbdfnbq"
+    from config import SMTP_EMAIL, SMTP_PASSWORD
+    sender_email = SMTP_EMAIL
+    sender_password = SMTP_PASSWORD
     
     msg = MIMEMultipart()
     msg['From'] = f"WinWin Pro <{sender_email}>"
@@ -1088,7 +1183,7 @@ def timewall_postback(request: Request) -> dict[str, Any]:
             "date": datetime.now(timezone.utc).isoformat(),
             "status": "Chargeback"
         })
-        ledger["userWc"] = ledger.get("userWc", 0) + currencyAmount
+        ledger["userWc"] = ledger.get("userWc", 0) - currencyAmount
 
     elif type_val == "hold":
         if any(h.get("id") == f"HOLD_{transactionID}" for h in history):
