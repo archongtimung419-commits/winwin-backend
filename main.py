@@ -122,6 +122,8 @@ class OnboardingRequest(BaseModel):
     age: str | None = None
     gender: str | None = None
     pincode: str | None = None
+    location_lat: float | None = None
+    location_lng: float | None = None
     isFinalStep: bool = False
 
 
@@ -359,6 +361,11 @@ def complete_onboarding(body: OnboardingRequest, user: dict[str, Any] = Depends(
     if body.pincode and not user.get("pincode"):
         user["pincode"] = body.pincode
         reward += 50
+        
+    if body.location_lat is not None:
+        user["location_lat"] = body.location_lat
+    if body.location_lng is not None:
+        user["location_lng"] = body.location_lng
 
     if reward > 0:
         user["balance"] = user.get("balance", 0.0) + float(reward)
