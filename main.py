@@ -1,8 +1,11 @@
 import hashlib
 import random
+import smtplib
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from typing import Any
 
 import hmac as _hmac
@@ -26,6 +29,8 @@ from config import (
     JWT_SECRET,
     MIN_REDEEM_WC,
     REFERRAL_CAP_WC,
+    SMTP_EMAIL,
+    SMTP_PASSWORD,
     TIMEWALL_SECRET_KEY,
 )
 from database import (
@@ -926,20 +931,18 @@ def verify_otp(body: OtpVerifyRequest) -> dict[str, Any]:
 
 @app.post("/api/otp/email")
 def send_email_otp(body: EmailOtpRequest) -> dict[str, Any]:
-    import smtplib
-    from email.mime.text import MIMEText
-    from email.mime.multipart import MIMEMultipart
-
-    from config import SMTP_EMAIL, SMTP_PASSWORD
-    sender_email = SMTP_EMAIL
-    sender_password = SMTP_PASSWORD
-    
     try:
+        sender_email = SMTP_EMAIL
+        sender_password = SMTP_PASSWORD
+
+        if not sender_email or not sender_password:
+            return {"success": False, "error": "SMTP not configured"}
+
         msg = MIMEMultipart()
         msg['From'] = f"WinWin Pro <{sender_email}>"
         msg['To'] = body.email
         msg['Subject'] = f"Your WinWin Pro code: {body.otp}"
-        
+
         html = f"""
         <html>
           <body style="font-family: Arial, sans-serif; background-color: #08090d; padding: 20px;">
@@ -950,13 +953,13 @@ def send_email_otp(body: EmailOtpRequest) -> dict[str, Any]:
               <div style="background-color: rgba(16, 229, 138, 0.1); border-left: 4px solid #10E58A; padding: 20px; margin: 25px 0; text-align: center; border-radius: 4px; -webkit-user-select: all; user-select: all; cursor: pointer;">
                 <h1 style="margin: 0; color: #10E58A; letter-spacing: 5px; font-size: 32px; -webkit-user-select: all; user-select: all;">{body.otp}</h1>
               </div>
-              <p style="font-size: 14px; color: #71717a;">Tap the code above to select &amp; copy. It will expire shortly.</p>
+              <p style="font-size: 14px; color: #71717a;">Tap the code above to select and copy. It will expire shortly.</p>
             </div>
           </body>
         </html>
         """
         msg.attach(MIMEText(html, 'html'))
-        
+
         server = smtplib.SMTP('smtp.gmail.com', 587)
         server.starttls()
         server.login(sender_email, sender_password)
