@@ -164,16 +164,36 @@ def get_current_user(creds: HTTPAuthorizationCredentials | None = Depends(securi
     user = get_user_by_id(payload["sub"])
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    if user.get("accountStatus") == "BANNED":
-        raise HTTPException(status_code=403, detail="Account is banned.")
+
     if user.get("accountStatus") == "TAMPERED":
         raise HTTPException(status_code=403, detail="Account locked due to tampering.")
     return user
 
 
 def verify_user_active(user: dict[str, Any]) -> None:
-    if user.get("accountStatus") != "ACTIVE":
+    if user.get("accountStatus") != "ACTIVE" and user.get("accountStatus") != "BANNED":
         raise HTTPException(status_code=403, detail="Account is not active.")
+
+def check_and_update_ip(user: dict[str, Any], ip: str | None) -> None:
+    if not ip or ip in ("127.0.0.1", "localhost"):
+        return
+    
+    all_users = list_all_users()
+    shared = False
+    for u in all_users:
+        if u["userId"] != user["userId"] and u.get("last_ip") == ip:
+            shared = True
+            break
+            
+    if shared:
+        warnings = user.get("ip_warnings", 0) + 1
+        user["ip_warnings"] = warnings
+        user["show_ip_warning"] = True
+        if warnings > 5:
+            user["accountStatus"] = "BANNED"
+    
+    user["last_ip"] = ip
+    save_user(user)
 
 
 def get_admin(creds: HTTPAuthorizationCredentials | None = Depends(security)) -> dict[str, Any]:
@@ -228,16 +248,17 @@ def get_cpa_apps() -> dict[str, Any]:
 # ── Auth routes ──────────────────────────────────────────────────────────────
 
 @app.post("/api/auth/register")
-def register(body: RegisterRequest) -> dict[str, Any]:
+def register(body: RegisterRequest, request: Request) -> dict[str, Any]:
     if get_user_by_email(body.email.lower()):
         raise HTTPException(status_code=400, detail="Username already registered.")
     user = create_user(body.email.lower(), pwd_context.hash(body.password), body.referral_code)
+    check_and_update_ip(user, request.client.host if request.client else None)
     token = create_token(user["userId"], "user")
     return {"token": token, "user": user}
 
 
 @app.post("/api/auth/login")
-def login(body: LoginRequest) -> dict[str, Any]:
+def login(body: LoginRequest, request: Request) -> dict[str, Any]:
     found = get_user_by_email(body.email.lower())
     if not found:
         raise HTTPException(status_code=401, detail="Invalid credentials.")
@@ -246,9 +267,8 @@ def login(body: LoginRequest) -> dict[str, Any]:
         raise HTTPException(status_code=401, detail="Invalid credentials.")
     if user.get("accountStatus") == "TAMPERED":
         raise HTTPException(status_code=403, detail="Account locked due to tampering.")
-    if user.get("accountStatus") == "BANNED":
-        raise HTTPException(status_code=403, detail="Account is banned.")
 
+    check_and_update_ip(user, request.client.host if request.client else None)
     token = create_token(user["userId"], "user")
     return {"token": token, "user": user}
 
@@ -282,7 +302,11 @@ def get_me(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
         + user.get("directLinksCompleted", 0) + user.get("socialTasksCompleted", 0)
         + user.get("completed_app_installs", 0)
     )
-    return user
+    res = dict(user)
+    if "show_ip_warning" in user:
+        del user["show_ip_warning"]
+        save_user(user)
+    return res
 
 
 @app.put("/api/users/me")
@@ -696,6 +720,8 @@ def credit_referral(body: ReferralCreditRequest, user: dict[str, Any] = Depends(
 @app.post("/api/withdrawals")
 def submit_withdrawal(body: WithdrawalRequest, user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
     verify_user_active(user)
+    if user.get("accountStatus") == "BANNED":
+        raise HTTPException(status_code=403, detail="Cashout currently paused right now, because your account is banned.")
     cfg = get_content_config() or {}
     try:
         min_redeem = int(cfg.get("minRedeem", MIN_REDEEM_WC))
