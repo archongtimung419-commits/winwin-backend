@@ -924,10 +924,10 @@ def admin_patch_user(user_id: str, body: AdminUserPatch, background_tasks: Backg
         
         if old_status != body.accountStatus:
             if body.accountStatus == "BANNED":
-                html = "<h2>Account Banned</h2><p>Your WinWin Rewards account has been banned due to policy violations.</p>"
+                html = "<h2>Account Banned</h2><p>Your WinWin Pro account has been banned due to policy violations.</p>"
                 background_tasks.add_task(send_notification_email_via_vercel, user.get("email"), "Account Banned", html)
             elif body.accountStatus == "ACTIVE" and old_status == "BANNED":
-                html = "<h2>Account Unbanned</h2><p>Good news! Your WinWin Rewards account has been unbanned. You can now log in and continue earning.</p>"
+                html = "<h2>Account Unbanned</h2><p>Good news! Your WinWin Pro account has been unbanned. You can now log in and continue earning.</p>"
                 background_tasks.add_task(send_notification_email_via_vercel, user.get("email"), "Account Unbanned", html)
     if body.dailyStreak is not None:
         user["dailyStreak"] = body.dailyStreak
