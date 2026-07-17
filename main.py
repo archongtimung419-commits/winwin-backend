@@ -94,6 +94,10 @@ class WithdrawalRequest(BaseModel):
 class OtpRequest(BaseModel):
     phone: str
 
+class EmailOtpRequest(BaseModel):
+    email: str
+    otp: str
+
 
 class AdminLoginRequest(BaseModel):
     username: str
@@ -783,6 +787,50 @@ async def send_otp(body: OtpRequest) -> dict[str, Any]:
     if data.get("return"):
         return {"success": True, "message": "OTP sent"}
     raise HTTPException(status_code=400, detail=data.get("message", "Failed to send OTP"))
+
+@app.post("/api/otp/email")
+def send_email_otp(body: EmailOtpRequest) -> dict[str, Any]:
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+
+    sender_email = "winwinpro.xyz@gmail.com"
+    sender_password = "rxccnjxrbvbdfnbq"
+    
+    msg = MIMEMultipart()
+    msg['From'] = f"WinWin Pro <{sender_email}>"
+    msg['To'] = body.email
+    msg['Subject'] = "Your WinWin Pro Verification Code"
+    
+    html = f"""
+    <html>
+      <body style="font-family: Arial, sans-serif; background-color: #08090d; padding: 20px;">
+        <div style="background-color: #12141d; padding: 30px; border-radius: 12px; max-width: 500px; margin: 0 auto; border: 1px solid rgba(16, 229, 138, 0.2);">
+          <h2 style="color: #10E58A; text-align: center; font-size: 24px; margin-bottom: 10px;">WinWin Pro</h2>
+          <p style="font-size: 16px; color: #fff;">Hello,</p>
+          <p style="font-size: 16px; color: #a1a1aa;">Your email verification code is:</p>
+          <div style="background-color: rgba(16, 229, 138, 0.1); border-left: 4px solid #10E58A; padding: 20px; margin: 25px 0; text-align: center; border-radius: 4px;">
+            <h1 style="margin: 0; color: #10E58A; letter-spacing: 5px; font-size: 32px;">{body.otp}</h1>
+          </div>
+          <p style="font-size: 14px; color: #71717a;">Please do not share this code with anyone. It will expire shortly.</p>
+        </div>
+      </body>
+    </html>
+    """
+    msg.attach(MIMEText(html, 'html'))
+    
+    try:
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(sender_email, sender_password)
+        server.send_message(msg)
+        server.quit()
+        return {"success": True, "message": "Email sent"}
+    except Exception as e:
+        print("SMTP Error:", e)
+        raise HTTPException(status_code=500, detail="Failed to send verification email.")
+
+
 
 
 # ── Admin routes ─────────────────────────────────────────────────────────────
