@@ -262,10 +262,10 @@ def register(body: RegisterRequest, request: Request) -> dict[str, Any]:
 def login(body: LoginRequest, request: Request) -> dict[str, Any]:
     found = get_user_by_email(body.email.lower())
     if not found:
-        raise HTTPException(status_code=401, detail="Invalid credentials.")
+        raise HTTPException(status_code=404, detail="User not found.")
     user, password_hash = found
     if not pwd_context.verify(body.password, password_hash):
-        raise HTTPException(status_code=401, detail="Invalid credentials.")
+        raise HTTPException(status_code=401, detail="Incorrect password.")
     if user.get("accountStatus") == "TAMPERED":
         raise HTTPException(status_code=403, detail="Account locked due to tampering.")
 
