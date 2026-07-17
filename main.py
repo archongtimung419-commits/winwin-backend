@@ -323,52 +323,52 @@ class ResetPasswordRequest(BaseModel):
 
 @app.post("/api/auth/forgot-password")
 def forgot_password(body: ForgotPasswordRequest) -> dict[str, str]:
-    import smtplib
-    from email.mime.text import MIMEText
-    from email.mime.multipart import MIMEMultipart
-    from config import SMTP_EMAIL, SMTP_PASSWORD
-
+    found = None
     try:
         found = get_user_by_email(body.email.lower())
     except Exception as e:
         print("DB Error (forgot-password):", e)
-        found = None
 
     if not found:
         return {"message": "If an account with that email exists, a reset link has been sent."}
 
     user, _ = found
-    reset_token = jwt.encode(
-        {"sub": user["userId"], "email": user["email"], "type": "password_reset",
-         "exp": datetime.now(timezone.utc) + timedelta(minutes=15)},
-        JWT_SECRET, algorithm=JWT_ALGORITHM,
-    )
-
-    reset_url = f"https://winwinpro.xyz/reset-password.html?token={reset_token}"
-
-    msg = MIMEMultipart()
-    msg['From'] = f"WinWin Pro <{SMTP_EMAIL}>"
-    msg['To'] = body.email
-    msg['Subject'] = "Reset Your WinWin Pro Password"
-
-    html = f"""
-    <html>
-      <body style="font-family: Arial, sans-serif; background-color: #08090d; padding: 20px;">
-        <div style="background-color: #12141d; padding: 30px; border-radius: 12px; max-width: 500px; margin: 0 auto; border: 1px solid rgba(16, 229, 138, 0.2);">
-          <h2 style="color: #10E58A; text-align: center; font-size: 24px; margin-bottom: 10px;">WinWin Pro</h2>
-          <p style="font-size: 16px; color: #fff;">Hello,</p>
-          <p style="font-size: 16px; color: #a1a1aa;">We received a request to reset your password. Click the button below to set a new password:</p>
-          <div style="text-align: center; margin: 25px 0;">
-            <a href="{reset_url}" style="background-color: #10E58A; color: #000; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 16px;">Reset Password</a>
-          </div>
-          <p style="font-size: 14px; color: #71717a;">This link will expire in 15 minutes. If you didn't request this, you can safely ignore this email.</p>
-        </div>
-      </body>
-    </html>
-    """
-    msg.attach(MIMEText(html, 'html'))
-
     try:
+        from config import SMTP_EMAIL, SMTP_PASSWORD
+        import smtplib
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+
+        reset_token = jwt.encode(
+            {"sub": user["userId"], "email": user["email"], "type": "password_reset",
+             "exp": datetime.now(timezone.utc) + timedelta(minutes=15)},
+            JWT_SECRET, algorithm=JWT_ALGORITHM,
+        )
+
+        reset_url = f"https://winwinpro.xyz/reset-password.html?token={reset_token}"
+
+        msg = MIMEMultipart()
+        msg['From'] = f"WinWin Pro <{SMTP_EMAIL}>"
+        msg['To'] = body.email
+        msg['Subject'] = "Reset Your WinWin Pro Password"
+
+        html = f"""
+        <html>
+          <body style="font-family: Arial, sans-serif; background-color: #08090d; padding: 20px;">
+            <div style="background-color: #12141d; padding: 30px; border-radius: 12px; max-width: 500px; margin: 0 auto; border: 1px solid rgba(16, 229, 138, 0.2);">
+              <h2 style="color: #10E58A; text-align: center; font-size: 24px; margin-bottom: 10px;">WinWin Pro</h2>
+              <p style="font-size: 16px; color: #fff;">Hello,</p>
+              <p style="font-size: 16px; color: #a1a1aa;">We received a request to reset your password. Click the button below to set a new password:</p>
+              <div style="text-align: center; margin: 25px 0;">
+                <a href="{reset_url}" style="background-color: #10E58A; color: #000; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 16px;">Reset Password</a>
+              </div>
+              <p style="font-size: 14px; color: #71717a;">This link will expire in 15 minutes. If you didn't request this, you can safely ignore this email.</p>
+            </div>
+          </body>
+        </html>
+        """
+        msg.attach(MIMEText(html, 'html'))
+
         server = smtplib.SMTP('smtp.gmail.com', 587)
         server.starttls()
         server.login(SMTP_EMAIL, SMTP_PASSWORD)
