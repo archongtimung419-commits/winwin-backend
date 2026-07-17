@@ -248,6 +248,10 @@ def on_startup() -> None:
 
 # ── Health ───────────────────────────────────────────────────────────────────
 
+@app.get("/")
+def root_health() -> dict[str, str]:
+    return {"status": "ok"}
+
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
