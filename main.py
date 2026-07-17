@@ -965,7 +965,7 @@ def send_email_otp(body: EmailOtpRequest) -> dict[str, Any]:
         return {"success": True, "message": "Email sent"}
     except Exception as e:
         print("OTP Email Error:", type(e).__name__, e)
-        raise HTTPException(status_code=500, detail="Failed to send verification email.")
+        return {"success": False, "error": str(e), "type": type(e).__name__}
 
 
 
