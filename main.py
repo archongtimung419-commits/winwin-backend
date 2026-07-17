@@ -139,6 +139,7 @@ class UserMeUpdateRequest(BaseModel):
     location_lat: float | None = None
     location_lng: float | None = None
     location_city: str | None = None
+    banAppeal: str | None = None
 
 
 # ── Auth helpers ─────────────────────────────────────────────────────────────
@@ -324,6 +325,11 @@ def update_me(body: UserMeUpdateRequest, user: dict[str, Any] = Depends(get_curr
         user["location_lng"] = body.location_lng
     if body.location_city is not None:
         user["location_city"] = body.location_city
+    if body.banAppeal:
+        user["banAppeal"] = {
+            "reason": body.banAppeal,
+            "date": datetime.now(timezone.utc).isoformat()
+        }
     return save_user(user)
 
 
@@ -831,6 +837,7 @@ def admin_patch_user(user_id: str, body: AdminUserPatch, _: dict[str, Any] = Dep
         user["accountStatus"] = body.accountStatus
         if body.accountStatus == "ACTIVE":
             user["ip_warnings"] = 0
+            user.pop("banAppeal", None)
     if body.dailyStreak is not None:
         user["dailyStreak"] = body.dailyStreak
     if body.earnings is not None:
