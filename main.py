@@ -78,11 +78,13 @@ class ReferralCreditRequest(BaseModel):
     amount: float
 
 
+from typing import Optional, Dict
+
 class WithdrawalRequest(BaseModel):
     amount: float
     method: str
     account_details: str
-
+    location_data: Optional[Dict] = None
 
 class OtpRequest(BaseModel):
     phone: str
