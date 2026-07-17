@@ -15,18 +15,12 @@ IS_POSTGRES = DATABASE_URL.startswith("postgres")
 if IS_POSTGRES:
     import psycopg2
     import psycopg2.extras
-    import urllib.parse
 
 class DBConnectionWrapper:
     def __init__(self):
         self.is_pg = IS_POSTGRES
         if self.is_pg:
-            conn_str = DATABASE_URL
-            if "%24" in conn_str or "%2F" in conn_str or "%40" in conn_str:
-                parsed = urllib.parse.urlparse(conn_str)
-                pwd = urllib.parse.unquote(parsed.password)
-                conn_str = conn_str.replace(parsed.password, pwd)
-            self.conn = psycopg2.connect(conn_str)
+            self.conn = psycopg2.connect(DATABASE_URL)
         else:
             self.conn = sqlite3.connect(DATABASE_PATH)
             self.conn.row_factory = sqlite3.Row
