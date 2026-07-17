@@ -119,7 +119,7 @@ class OnboardingRequest(BaseModel):
     name: str | None = None
     age: str | None = None
     gender: str | None = None
-    state: str | None = None
+    pincode: str | None = None
     isFinalStep: bool = False
 
 
@@ -354,8 +354,8 @@ def complete_onboarding(body: OnboardingRequest, user: dict[str, Any] = Depends(
     if body.gender and not user.get("gender"):
         user["gender"] = body.gender
         reward += 50
-    if body.state and not user.get("state"):
-        user["state"] = body.state
+    if body.pincode and not user.get("pincode"):
+        user["pincode"] = body.pincode
         reward += 50
 
     if reward > 0:
