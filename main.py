@@ -125,6 +125,11 @@ class OnboardingRequest(BaseModel):
 
 class UserMeUpdateRequest(BaseModel):
     username: str | None = None
+    clearNotifications: bool | None = None
+    pincode: str | None = None
+    location_lat: float | None = None
+    location_lng: float | None = None
+    location_city: str | None = None
 
 
 # ── Auth helpers ─────────────────────────────────────────────────────────────
@@ -282,6 +287,16 @@ def update_me(body: UserMeUpdateRequest, user: dict[str, Any] = Depends(get_curr
     verify_user_active(user)
     if body.username is not None:
         user["username"] = body.username
+    if body.clearNotifications:
+        user["notifications"] = []
+    if body.pincode is not None:
+        user["pincode"] = body.pincode
+    if body.location_lat is not None:
+        user["location_lat"] = body.location_lat
+    if body.location_lng is not None:
+        user["location_lng"] = body.location_lng
+    if body.location_city is not None:
+        user["location_city"] = body.location_city
     return save_user(user)
 
 
@@ -1026,6 +1041,13 @@ def perform_automated_draw():
                 "date": datetime.datetime.now().isoformat()
             })
             winner_user["earningsHistory"] = history
+            winner_user.setdefault("notifications", []).append({
+                "id": f"notif_lottery_{int(time.time())}_{i}",
+                "title": f"Lottery Win! (Rank {i+1})",
+                "message": f"Congratulations! You won {prize_per_winner} ₩ in the lottery!",
+                "date": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "read": False
+            })
             try:
                 save_user(winner_user)
             except Exception as e:
