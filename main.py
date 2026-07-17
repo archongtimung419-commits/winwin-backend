@@ -144,6 +144,7 @@ class UserMeUpdateRequest(BaseModel):
     location_lng: float | None = None
     location_city: str | None = None
     banAppeal: str | None = None
+    emailVerified: bool | None = None
 
 
 # ── Auth helpers ─────────────────────────────────────────────────────────────
@@ -334,6 +335,8 @@ def update_me(body: UserMeUpdateRequest, user: dict[str, Any] = Depends(get_curr
             "reason": body.banAppeal,
             "date": datetime.now(timezone.utc).isoformat()
         }
+    if body.emailVerified is True:
+        user["emailVerified"] = True
     return save_user(user)
 
 
@@ -730,6 +733,8 @@ def credit_referral(body: ReferralCreditRequest, user: dict[str, Any] = Depends(
 @app.post("/api/withdrawals")
 def submit_withdrawal(body: WithdrawalRequest, user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
     verify_user_active(user)
+    if not user.get("emailVerified"):
+        raise HTTPException(status_code=403, detail="You must verify your email address in User Info before you can cash out.")
     if user.get("accountStatus") == "BANNED":
         raise HTTPException(status_code=403, detail="Cashout currently paused right now, because your account is banned.")
     cfg = get_content_config() or {}

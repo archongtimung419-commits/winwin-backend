@@ -70,6 +70,7 @@ def default_user_fields(user_id: str, email: str, balance: float, is_vip: bool =
         "dailyStreak": 1,
         "onboarding_stage": 0,
         "createdAt": _now_iso(),
+        "emailVerified": False,
         "referralsCount": 0,
         "referralCommissionEarned": 0,
         "videoAdsCompleted": 0,
