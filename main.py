@@ -134,7 +134,7 @@ class OnboardingRequest(BaseModel):
 
 class UserMeUpdateRequest(BaseModel):
     username: str | None = None
-    clearNotifications: bool | None = None
+    syncNotifications: list | None = None
     pincode: str | None = None
     location_lat: float | None = None
     location_lng: float | None = None
@@ -314,8 +314,8 @@ def update_me(body: UserMeUpdateRequest, user: dict[str, Any] = Depends(get_curr
     verify_user_active(user)
     if body.username is not None:
         user["username"] = body.username
-    if body.clearNotifications:
-        user["notifications"] = []
+    if body.syncNotifications is not None:
+        user["notifications"] = body.syncNotifications
     if body.pincode is not None:
         user["pincode"] = body.pincode
     if body.location_lat is not None:
