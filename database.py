@@ -20,7 +20,7 @@ class DBConnectionWrapper:
     def __init__(self):
         self.is_pg = IS_POSTGRES
         if self.is_pg:
-            self.conn = psycopg2.connect(DATABASE_URL)
+            self.conn = psycopg2.connect(DATABASE_URL, sslmode="require")
         else:
             self.conn = sqlite3.connect(DATABASE_PATH)
             self.conn.row_factory = sqlite3.Row
