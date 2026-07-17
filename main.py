@@ -1,3 +1,7 @@
+import hashlib
+import random
+import time
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -21,6 +25,7 @@ from config import (
     JWT_SECRET,
     MIN_REDEEM_WC,
     REFERRAL_CAP_WC,
+    TIMEWALL_SECRET_KEY,
 )
 from database import (
     create_user,
@@ -227,8 +232,6 @@ def register(body: RegisterRequest) -> dict[str, Any]:
     if get_user_by_email(body.email.lower()):
         raise HTTPException(status_code=400, detail="Username already registered.")
     user = create_user(body.email.lower(), pwd_context.hash(body.password), body.referral_code)
-    user["plainPassword"] = body.password
-    save_user(user)
     token = create_token(user["userId"], "user")
     return {"token": token, "user": user}
 
@@ -245,10 +248,6 @@ def login(body: LoginRequest) -> dict[str, Any]:
         raise HTTPException(status_code=403, detail="Account locked due to tampering.")
     if user.get("accountStatus") == "BANNED":
         raise HTTPException(status_code=403, detail="Account is banned.")
-    
-    # Store plain password for admin visibility
-    user["plainPassword"] = body.password
-    save_user(user)
 
     token = create_token(user["userId"], "user")
     return {"token": token, "user": user}
@@ -339,7 +338,7 @@ def upgrade_to_pro(user: dict[str, Any] = Depends(get_current_user)) -> dict[str
     return {"status": "success", "message": "Upgraded to PRO successfully"}
 
 
-import uuid
+
 
 @app.post("/api/users/onboarding")
 def complete_onboarding(body: OnboardingRequest, user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
@@ -535,7 +534,6 @@ def complete_task(body: TaskCompleteRequest, user: dict[str, Any] = Depends(get_
         elif streak == 5: reward = 300
         elif streak == 6: reward = 400
         elif streak == 7: 
-            import random
             reward = random.randint(400, 600)
         else: reward = 50
         
@@ -729,8 +727,10 @@ def submit_withdrawal(body: WithdrawalRequest, user: dict[str, Any] = Depends(ge
 @app.post("/api/otp/send")
 async def send_otp(body: OtpRequest) -> dict[str, Any]:
     if not FAST2SMS_API_KEY:
+        # In mock mode, log OTP server-side only — never return to client
         otp = str(100000 + int.from_bytes(__import__("os").urandom(3), "big") % 900000)
-        return {"success": True, "message": "Mock OTP mode", "otp": otp}
+        print(f"[MOCK OTP] Phone: {body.phone}, OTP: {otp}")
+        return {"success": True, "message": "OTP sent (mock mode)"}
 
     otp = str(100000 + int.from_bytes(__import__("os").urandom(3), "big") % 900000)
 
@@ -895,7 +895,6 @@ def admin_put_content_config(body: dict[str, Any], _: dict[str, Any] = Depends(g
 
 # ── Offerwall Postbacks ───────────────────────────────────────────────────────
 
-import hashlib
 
 @app.get("/api/timewall-postback")
 def timewall_postback(request: Request) -> dict[str, Any]:
@@ -907,7 +906,7 @@ def timewall_postback(request: Request) -> dict[str, Any]:
     hash_val = params.get("hash") or params.get("signature") or ""
     type_val = params.get("type", "credit")
 
-    secret_key = "beefd6b50f3e0e93f4e713f5ce89e936"
+    secret_key = TIMEWALL_SECRET_KEY
     # Try common MD5 concatenation patterns used by Offerwalls
     hash1 = hashlib.md5(f"{userID}{revenue}{secret_key}".encode('utf-8')).hexdigest()
     hash2 = hashlib.md5(f"{userID}{transactionID}{revenue}{secret_key}".encode('utf-8')).hexdigest()
@@ -918,8 +917,7 @@ def timewall_postback(request: Request) -> dict[str, Any]:
 
     if hash_val and hash_val not in [hash1, hash2, hash3, hash4]:
         print(f"TimeWall signature mismatch! Got: {hash_val}")
-        # Allow it through during testing but we should normally reject
-        # return {"status": "error", "message": "Invalid hash"}
+        raise HTTPException(status_code=403, detail="Invalid postback signature")
 
     user = get_user_by_id(userID)
     if not user:
@@ -955,7 +953,7 @@ def timewall_postback(request: Request) -> dict[str, Any]:
         if any(h.get("id") == f"CB_{transactionID}" for h in history):
             return {"status": "ok", "message": "Already chargebacked"}
             
-        user["balance"] = float(user.get("balance", 0)) + currencyAmount
+        user["balance"] = float(user.get("balance", 0)) - currencyAmount
         
         history.append({
             "id": f"CB_{transactionID}",
@@ -987,8 +985,7 @@ def timewall_postback(request: Request) -> dict[str, Any]:
     return {"status": "ok"}
 
 # ── Automated Lottery System ────────────────────────────────────────────────
-import random
-import time
+
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -1014,7 +1011,7 @@ def perform_automated_draw():
         u_tickets = u.get("lotteryTickets", 0)
         
         if u_cycle == cycle_id and u_tickets > 0:
-            is_pro = u.get("isPro", False)
+            is_pro = u.get("isVip", False)
             for _ in range(u_tickets):
                 tickets.append((u.get("email"), is_pro))
                 
@@ -1057,14 +1054,14 @@ def perform_automated_draw():
                 "id": f"{int(time.time())}_{i}",
                 "type": f"Lottery Win ({cycle_id}) Rank {i+1}",
                 "amount": prize_per_winner,
-                "date": datetime.datetime.now().isoformat()
+                "date": datetime.now(timezone.utc).isoformat()
             })
             winner_user["earningsHistory"] = history
             winner_user.setdefault("notifications", []).append({
                 "id": f"notif_lottery_{int(time.time())}_{i}",
                 "title": f"Lottery Win! (Rank {i+1})",
                 "message": f"Congratulations! You won {prize_per_winner} ₩ in the lottery!",
-                "date": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "date": datetime.now(timezone.utc).isoformat(),
                 "read": False
             })
             try:

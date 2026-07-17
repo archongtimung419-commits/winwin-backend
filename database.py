@@ -146,7 +146,7 @@ def init_db() -> None:
             )
 
 
-def row_to_user(row: sqlite3.Row) -> dict[str, Any]:
+def row_to_user(row: Any) -> dict[str, Any]:
     data = json.loads(row["data_json"])
     data["email"] = row["email"]
     return data
