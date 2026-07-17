@@ -581,6 +581,16 @@ def complete_task(body: TaskCompleteRequest, user: dict[str, Any] = Depends(get_
         return save_user(user)
 
     reward = TASK_REWARDS.get(body.task_type)
+    if body.task_type in ["articleRead", "article"]:
+        # Try to fetch dynamic config
+        config = get_content_config() or {}
+        dynamic_reward = config.get("articleReward")
+        if dynamic_reward is not None:
+            try:
+                reward = float(dynamic_reward)
+            except:
+                pass
+
     if reward is None:
         raise HTTPException(status_code=400, detail=f"Unknown task type: {body.task_type}")
     if reward <= 0:
