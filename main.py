@@ -937,7 +937,7 @@ def send_email_otp(body: EmailOtpRequest) -> dict[str, Any]:
     msg = MIMEMultipart()
     msg['From'] = f"WinWin Pro <{sender_email}>"
     msg['To'] = body.email
-    msg['Subject'] = "Your WinWin Pro Verification Code"
+    msg['Subject'] = f"Your WinWin Pro code: {body.otp}"
     
     html = f"""
     <html>
@@ -946,10 +946,10 @@ def send_email_otp(body: EmailOtpRequest) -> dict[str, Any]:
           <h2 style="color: #10E58A; text-align: center; font-size: 24px; margin-bottom: 10px;">WinWin Pro</h2>
           <p style="font-size: 16px; color: #fff;">Hello,</p>
           <p style="font-size: 16px; color: #a1a1aa;">Your email verification code is:</p>
-          <div style="background-color: rgba(16, 229, 138, 0.1); border-left: 4px solid #10E58A; padding: 20px; margin: 25px 0; text-align: center; border-radius: 4px;">
-            <h1 style="margin: 0; color: #10E58A; letter-spacing: 5px; font-size: 32px;">{body.otp}</h1>
+          <div style="background-color: rgba(16, 229, 138, 0.1); border-left: 4px solid #10E58A; padding: 20px; margin: 25px 0; text-align: center; border-radius: 4px; -webkit-user-select: all; user-select: all; cursor: pointer;">
+            <h1 style="margin: 0; color: #10E58A; letter-spacing: 5px; font-size: 32px; -webkit-user-select: all; user-select: all;">{body.otp}</h1>
           </div>
-          <p style="font-size: 14px; color: #71717a;">Please do not share this code with anyone. It will expire shortly.</p>
+          <p style="font-size: 14px; color: #71717a;">Tap the code above to select &amp; copy. It will expire shortly.</p>
         </div>
       </body>
     </html>
