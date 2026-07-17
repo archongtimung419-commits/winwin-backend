@@ -6,9 +6,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import hmac as _hmac
+import asyncio
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, status, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
@@ -39,11 +40,39 @@ from database import (
     list_all_users,
     list_all_withdrawals,
     save_user,
+    save_withdrawal,
     delete_user,
     set_content_config,
     set_system_setting,
+    update_system_setting,
     update_withdrawal_status,
 )
+
+async def send_notification_email_via_vercel(email: str, subject: str, html: str):
+    if not email or "@" not in email:
+        return
+    try:
+        async with httpx.AsyncClient() as client:
+            await client.post(
+                "https://winwinpro.xyz/api/send-notification-email",
+                json={"email": email, "subject": subject, "message_html": html},
+                timeout=10.0
+            )
+    except Exception as e:
+        print(f"Failed to send email to {email}: {e}")
+
+def send_notification_email_sync(email: str, subject: str, html: str):
+    if not email or "@" not in email:
+        return
+    try:
+        import requests
+        requests.post(
+            "https://winwinpro.xyz/api/send-notification-email",
+            json={"email": email, "subject": subject, "message_html": html},
+            timeout=10.0
+        )
+    except Exception as e:
+        print(f"Failed to send email sync to {email}: {e}")
 
 pwd_context = CryptContext(schemes=["sha256_crypt"], deprecated="auto")
 security = HTTPBearer(auto_error=False)
@@ -878,7 +907,7 @@ def admin_metrics(_: dict[str, Any] = Depends(get_admin)) -> dict[str, Any]:
 
 
 @app.patch("/api/admin/users/{user_id}")
-def admin_patch_user(user_id: str, body: AdminUserPatch, _: dict[str, Any] = Depends(get_admin)) -> dict[str, Any]:
+def admin_patch_user(user_id: str, body: AdminUserPatch, background_tasks: BackgroundTasks, _: dict[str, Any] = Depends(get_admin)) -> dict[str, Any]:
     user = get_user_by_id(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -887,10 +916,19 @@ def admin_patch_user(user_id: str, body: AdminUserPatch, _: dict[str, Any] = Dep
     if body.isVip is not None:
         user["isVip"] = body.isVip
     if body.accountStatus is not None:
+        old_status = user.get("accountStatus")
         user["accountStatus"] = body.accountStatus
         if body.accountStatus == "ACTIVE":
             user["ip_warnings"] = 0
             user.pop("banAppeal", None)
+        
+        if old_status != body.accountStatus:
+            if body.accountStatus == "BANNED":
+                html = "<h2>Account Banned</h2><p>Your WinWin Rewards account has been banned due to policy violations.</p>"
+                background_tasks.add_task(send_notification_email_via_vercel, user.get("email"), "Account Banned", html)
+            elif body.accountStatus == "ACTIVE" and old_status == "BANNED":
+                html = "<h2>Account Unbanned</h2><p>Good news! Your WinWin Rewards account has been unbanned. You can now log in and continue earning.</p>"
+                background_tasks.add_task(send_notification_email_via_vercel, user.get("email"), "Account Unbanned", html)
     if body.dailyStreak is not None:
         user["dailyStreak"] = body.dailyStreak
     if body.earnings is not None:
@@ -1154,6 +1192,9 @@ def perform_automated_draw():
             })
             try:
                 save_user(winner_user)
+                html = f"<h2>Lottery Winner!</h2><p>Congratulations! You won {prize_per_winner} ₩ in the weekly lottery. Your rank is #{i+1}.</p>"
+                import threading
+                threading.Thread(target=send_notification_email_sync, args=(winner_user.get("email"), "You Won the Lottery!", html)).start()
             except Exception as e:
                 print(f"Error saving user {email}: {e}")
 
