@@ -829,6 +829,8 @@ def admin_patch_user(user_id: str, body: AdminUserPatch, _: dict[str, Any] = Dep
         user["isVip"] = body.isVip
     if body.accountStatus is not None:
         user["accountStatus"] = body.accountStatus
+        if body.accountStatus == "ACTIVE":
+            user["ip_warnings"] = 0
     if body.dailyStreak is not None:
         user["dailyStreak"] = body.dailyStreak
     if body.earnings is not None:
