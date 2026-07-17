@@ -328,7 +328,12 @@ def forgot_password(body: ForgotPasswordRequest) -> dict[str, str]:
     from email.mime.multipart import MIMEMultipart
     from config import SMTP_EMAIL, SMTP_PASSWORD
 
-    found = get_user_by_email(body.email.lower())
+    try:
+        found = get_user_by_email(body.email.lower())
+    except Exception as e:
+        print("DB Error (forgot-password):", e)
+        found = None
+
     if not found:
         return {"message": "If an account with that email exists, a reset link has been sent."}
 
