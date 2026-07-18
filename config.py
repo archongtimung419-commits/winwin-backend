@@ -50,3 +50,5 @@ NORMAL_SIGNUP_BONUS_WC = 0
 REFERRAL_CAP_WC = 10000
 MIN_REDEEM_WC = 1000
 OWNER_EMAIL = os.getenv("OWNER_EMAIL", "arsong@modreator.com")
+SMTP_EMAIL = os.getenv("SMTP_EMAIL", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
