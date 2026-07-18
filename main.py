@@ -1,11 +1,8 @@
 import hashlib
 import random
-import smtplib
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from typing import Any
 
 import hmac as _hmac
@@ -29,8 +26,6 @@ from config import (
     JWT_SECRET,
     MIN_REDEEM_WC,
     REFERRAL_CAP_WC,
-    SMTP_EMAIL,
-    SMTP_PASSWORD,
     TIMEWALL_SECRET_KEY,
 )
 from database import (
@@ -932,6 +927,11 @@ def verify_otp(body: OtpVerifyRequest) -> dict[str, Any]:
 @app.post("/api/otp/email")
 def send_email_otp(body: EmailOtpRequest) -> dict[str, Any]:
     try:
+        import smtplib
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+        from config import SMTP_EMAIL, SMTP_PASSWORD
+
         sender_email = SMTP_EMAIL
         sender_password = SMTP_PASSWORD
 
