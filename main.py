@@ -949,7 +949,7 @@ async def send_otp(body: OtpRequest) -> dict[str, Any]:
     otp = str(100000 + int.from_bytes(__import__("os").urandom(3), "big") % 900000)
     _otp_store[body.phone] = otp
     if not FAST2SMS_API_KEY:
-        print(f"[MOCK OTP] Phone: {body.phone}, OTP: {otp}")
+        print(f"[MOCK OTP] Phone: {body.phone}, OTP: ***")
         return {"success": True, "message": "OTP sent (mock mode)"}
 
     async with httpx.AsyncClient() as client:
