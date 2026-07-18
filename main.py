@@ -1,7 +1,9 @@
 import hashlib
 import random
+import re
 import time
 import uuid
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -9,12 +11,13 @@ import hmac as _hmac
 import asyncio
 
 import httpx
+from fastapi.responses import JSONResponse
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from config import (
     ADMIN_PASSWORD,
@@ -87,12 +90,61 @@ app.add_middleware(
 )
 
 
+# ── Rate Limiter (in-memory, no deps) ────────────────────────────────────────
+
+class _RateLimiter:
+    def __init__(self, max_requests: int, window_seconds: int):
+        self.max_requests = max_requests
+        self.window = window_seconds
+        self._hits: dict[str, list[float]] = defaultdict(list)
+
+    def is_allowed(self, key: str) -> bool:
+        now = time.time()
+        cutoff = now - self.window
+        self._hits[key] = [t for t in self._hits[key] if t > cutoff]
+        if len(self._hits[key]) >= self.max_requests:
+            return False
+        self._hits[key].append(now)
+        return True
+
+register_limiter = _RateLimiter(max_requests=5, window_seconds=60)
+login_limiter = _RateLimiter(max_requests=10, window_seconds=60)
+
+EMAIL_REGEX = re.compile(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$")
+
+
+# ── Global Error Handler (sanitize in production) ─────────────────────────────
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    print(f"[UNHANDLED] {type(exc).__name__}: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "An internal error occurred. Please try again."},
+    )
+
+
 # ── Schemas ──────────────────────────────────────────────────────────────────
 
 class RegisterRequest(BaseModel):
     email: str
     password: str
     referral_code: str = ""
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not EMAIL_REGEX.match(v):
+            raise ValueError("Invalid email format")
+        return v
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if len(v) < 6:
+            raise ValueError("Password must be at least 6 characters")
+        return v
 
 
 class LoginRequest(BaseModel):
@@ -287,26 +339,32 @@ def get_cpa_apps() -> dict[str, Any]:
 
 @app.post("/api/auth/register")
 def register(body: RegisterRequest, request: Request) -> dict[str, Any]:
+    client_ip = request.client.host if request.client else "unknown"
+    if not register_limiter.is_allowed(client_ip):
+        raise HTTPException(status_code=429, detail="Too many registration attempts. Please wait and try again.")
     if get_user_by_email(body.email.lower()):
         raise HTTPException(status_code=400, detail="Username already registered.")
     user = create_user(body.email.lower(), pwd_context.hash(body.password), body.referral_code)
-    check_and_update_ip(user, request.client.host if request.client else None)
+    check_and_update_ip(user, client_ip)
     token = create_token(user["userId"], "user")
     return {"token": token, "user": user}
 
 
 @app.post("/api/auth/login")
 def login(body: LoginRequest, request: Request) -> dict[str, Any]:
+    client_ip = request.client.host if request.client else "unknown"
+    if not login_limiter.is_allowed(client_ip):
+        raise HTTPException(status_code=429, detail="Too many login attempts. Please wait and try again.")
     found = get_user_by_email(body.email.lower())
     if not found:
-        raise HTTPException(status_code=404, detail="User not found.")
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
     user, password_hash = found
     if not pwd_context.verify(body.password, password_hash):
-        raise HTTPException(status_code=401, detail="Incorrect password.")
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
     if user.get("accountStatus") == "TAMPERED":
         raise HTTPException(status_code=403, detail="Account locked due to tampering.")
 
-    check_and_update_ip(user, request.client.host if request.client else None)
+    check_and_update_ip(user, client_ip)
     token = create_token(user["userId"], "user")
     return {"token": token, "user": user}
 
@@ -753,7 +811,7 @@ def complete_task(body: TaskCompleteRequest, user: dict[str, Any] = Depends(get_
         if dynamic_reward is not None:
             try:
                 reward = float(dynamic_reward)
-            except:
+            except (ValueError, TypeError):
                 pass
 
     if reward is None:
@@ -955,7 +1013,7 @@ def send_email_otp(body: EmailOtpRequest) -> dict[str, Any]:
                 return {"success": False, "error": f"Email service returned {r.status_code}"}
     except Exception as e:
         print("OTP Email Error:", type(e).__name__, e)
-        return {"success": False, "error": str(e), "type": type(e).__name__}
+        return {"success": False, "error": "Email service temporarily unavailable"}
 
 
 
@@ -1122,6 +1180,8 @@ def timewall_postback(request: Request) -> dict[str, Any]:
     transactionID = params.get("transactionID") or params.get("transactionId") or ""
     revenue = params.get("revenue", "0")
     currencyAmount = float(params.get("currencyAmount") or params.get("reward") or 0.0)
+    if currencyAmount <= 0:
+        return {"status": "ok", "message": "Ignored: invalid amount"}
     hash_val = params.get("hash") or params.get("signature") or ""
     type_val = params.get("type", "credit")
 
@@ -1134,8 +1194,10 @@ def timewall_postback(request: Request) -> dict[str, Any]:
     # We also check sha256 just in case
     hash4 = hashlib.sha256(f"{userID}{revenue}{secret_key}".encode('utf-8')).hexdigest()
 
-    if hash_val and hash_val not in [hash1, hash2, hash3, hash4]:
-        print(f"TimeWall signature mismatch! Got: {hash_val}")
+    if not hash_val:
+        raise HTTPException(status_code=400, detail="Missing signature")
+    if hash_val not in [hash1, hash2, hash3, hash4]:
+        print(f"TimeWall signature mismatch! Got: {hash_val[:8]}...")
         raise HTTPException(status_code=403, detail="Invalid postback signature")
 
     user = get_user_by_id(userID)
@@ -1250,10 +1312,13 @@ def perform_automated_draw():
     if not weighted_pool or num_winners == 0:
         return
 
-    while len(unique_winners) < num_winners:
+    max_iterations = num_winners * 10
+    iterations = 0
+    while len(unique_winners) < num_winners and iterations < max_iterations:
         winner = random.choice(weighted_pool)
         if winner not in unique_winners:
             unique_winners.append(winner)
+        iterations += 1
 
     prize_per_winner = int(pool / num_winners)
 
