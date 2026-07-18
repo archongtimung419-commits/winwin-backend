@@ -369,7 +369,7 @@ def forgot_password(body: ForgotPasswordRequest) -> dict[str, str]:
         """
         msg.attach(MIMEText(html, 'html'))
 
-        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server = smtplib.SMTP('smtp.gmail.com', 587, timeout=15)
         server.starttls()
         server.login(SMTP_EMAIL, SMTP_PASSWORD)
         server.send_message(msg)
@@ -960,7 +960,7 @@ def send_email_otp(body: EmailOtpRequest) -> dict[str, Any]:
         """
         msg.attach(MIMEText(html, 'html'))
 
-        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server = smtplib.SMTP('smtp.gmail.com', 587, timeout=15)
         server.starttls()
         server.login(sender_email, sender_password)
         server.send_message(msg)
